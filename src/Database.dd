@@ -98,6 +98,7 @@ class Ebook
     array char Title
     array char Author
     bool hasAudio
+    bool isSingle  // Short ebook
 
 class Chapter
     array char text // In markdown format?
@@ -132,6 +133,6 @@ class Item
 
 relationship Media Item doubly_linked mandatory
 relationship Member Item doubly_linked mandatory
-relationship Seller Item doubly_linked mandatory
+relationship Seller Media doubly_linked mandatory
 relationship Album Song doubly_linked mandatory
 relationship Ebook Chapter doubly_linked mandatory

@@ -1,0 +1,91 @@
+module Share sa
+
+class Root
+    uint64 nextListingID
+    uint64 nextThreadID
+    uint64 nextPostID
+    uint64 nextAnnouncementID
+
+class Region
+    uint32 numListings
+
+class Session
+
+class User
+    array char shownName // Differs by at only case from user name
+    sym email
+    uint64 joinDate
+    bool active
+    array uint8 hashedPassword
+    array uint8 nounce
+    bool loggedIn
+    uint64 lastActivity
+    uint32 balance
+    bool validated
+    array uint8 validationKey
+    bool supremeLeader // There can be only one
+    bool regionManager // There can be multiple per region
+
+class Transaction array
+    uint64 date
+    uint32 amount
+    array char description
+
+class Charity
+
+class Membership
+
+class Category
+    uint32 numListings
+
+class Listing
+    array char title
+    array char description
+    uint64 ID
+    uint32 rate
+    bool offered
+    bool fixedPrice // Hourly otherwise
+
+class Thread
+    array char subject
+    uint32 ID
+    uint32 numPosts
+
+class Post
+    uint64 date
+    array char message
+    uint32 ID
+
+class Subscription
+
+class Announcement
+    uint64 date
+    array char subject
+    array char message
+    uint32 ID
+
+relationship Root Region hashed
+relationship Root User hashed
+relationship Root:ByEmail User:ByEmail hashed email
+relationship Root Charity doubly_linked
+relationship User Charity mandatory
+relationship Charity Membership doubly_linked mandatory
+relationship User Membership hashed Charity mandatory
+relationship User:From Transaction:Out doubly_linked mandatory
+relationship User:To Transaction:In doubly_linked mandatory
+relationship Root Category hashed
+relationship User Listing doubly_linked mandatory
+relationship Category Listing doubly_linked mandatory
+relationship Root Listing hashed ID
+relationship Region User doubly_linked mandatory
+relationship Root Session hashed
+relationship Session User
+relationship Session Region
+relationship Root Thread hashed ID
+relationship Root Post hashed ID
+relationship Thread Post doubly_linked mandatory
+relationship User Post hashed ID mandatory
+relationship Thread Subscription doubly_linked mandatory
+relationship User Subscription doubly_linked mandatory
+relationship User Announcement doubly_linked mandatory
+relationship Root Announcement hashed ID mandatory
