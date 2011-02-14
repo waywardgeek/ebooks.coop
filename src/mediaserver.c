@@ -13,10 +13,7 @@
 
 #define MAX_ARGS 10
 #define NOUNCE_LENGTH 32
-#define MIN_RATE 10
-#define MAX_RATE 200
 #define NEW_USER_DONATION 889
-#define INITIAL_BALANCE 1000
 #define LOG_FILE "media.log"
 #define OLD_LOG_FILE "media.log.old"
 #define DATABASE_FILE "media.db"
@@ -26,7 +23,6 @@ static char *meLineBuffer;
 static uint32 meLineSize;
 static meSession meCurrentSession;
 static meUser meCurrentUser;
-static meRegion meCurrentRegion;
 static FILE *meLogFile;
 static bool meProcessingLogFile;
 static uint64 meCurrentTime;
@@ -86,7 +82,7 @@ static void mailPost(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Send an announcement to a region, or globally.
+  Send an announcement to everyone.
 --------------------------------------------------------------------------------------------------*/
 static void sendAnnouncement(
     meAnnouncement announcement)
@@ -96,15 +92,9 @@ static void sendAnnouncement(
     char *subject = meAnnouncementGetSubject(announcement);
     char *message = meAnnouncementGetMessage(announcement);
 
-    if(meUserSupremeLeader(sender)) {
-        meForeachRootUser(meTheRoot, user) {
-            sendMail(utSymGetName(meUserGetEmail(user)), subject, message);
-        } meEndRootUser;
-    } else {
-        meForeachRegionUser(meUserGetRegion(sender), user) {
-            sendMail(utSymGetName(meUserGetEmail(user)), subject, message);
-        } meEndRegionUser;
-    }
+    meForeachRootUser(meTheRoot, user) {
+        sendMail(utSymGetName(meUserGetEmail(user)), subject, message);
+    } meEndRootUser;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -202,17 +192,15 @@ static void printHelp(
             "    balance\n"
             "    send userName amount note - send stars to an account\n"
             "    transactions [fromDate [toDate]] - list transactions\n"
-            "    listRegions\n"
-            "    chooseRegion region\n"
             "    list [cateory]\n"
             "    show listingID\n"
             "    newListing (offered|wanted) category rate title description\n"
             "    editListing listingID (offered|wanted) category rate title description\n"
             "    deleteListing listingID\n"
             "For manipulating accounts:\n"
-            "    newUser userName region email password\n"
-            "    newCharity userName region email password\n"
-            "    updateAccount userName region email oldPassword [password]\n"
+            "    newUser userName shownName email password\n"
+            "    newCharity userName email password\n"
+            "    updateAccount userName email oldPassword [password]\n"
             "    accountSettings\n"
             "    joinCharity charityName\n"
             "    validateUser userName key\n"
@@ -233,10 +221,6 @@ static void printHelp(
             "    createCategory category\n"
             "    deleteCategory category\n"
             "    renameCategory oldName newName\n"
-            "    createRegion region\n"
-            "    deleteRegion region\n"
-            "    renameRegion oldName newName\n"
-            "    setRegionManager userName (true/false)\n"
             "    saveDatabase\n"
             "For more detailed description of a command, use \"help command\".\n"
             );
@@ -263,12 +247,6 @@ static void printHelp(
         coPrintf("transactions [fromDate [toDate]]\n"
             "List transactions in your account between the dates listed (inclusive).  Dates\n"
             "are in MM/DD/YY format.\n");
-    } else if(!strcmp(command, "listRegions")) {
-        coPrintf("listRegions\n"
-            "List regions.\n");
-    } else if(!strcmp(command, "chooseRegion")) {
-        coPrintf("chooseRegion region\n"
-            "Select a region.  You must do this to view listings.\n");
     } else if(!strcmp(command, "list")) {
         coPrintf("list [cateory]\n"
             "List all categories, or the listings in a category.\n");
@@ -277,16 +255,16 @@ static void printHelp(
             "Show details on a specific listing.  The listingID is shown by the\n"
             "list command.\n");
     } else if(!strcmp(command, "newUser")) {
-        coPrintf("newUser userName region email password\n"
+        coPrintf("newUser userName shownName email password\n"
             "Create a new unvalidated user.  The user should receive an e-mail with\n"
             "a validation key.\n");
     } else if(!strcmp(command, "newCharity")) {
-        coPrintf("newCharity charityName region email password\n"
+        coPrintf("newCharity charityName email password\n"
             "Create a new charity, which is a special kind of user, representing a\n"
             "participating charity.  The user should receive an e-mail with\n"
             "a validation key.\n");
     } else if(!strcmp(command, "updateAccount")) {
-        coPrintf("updateAccount userName region email oldPassword [password]\n"
+        coPrintf("updateAccount userName email oldPassword [password]\n"
             "Change account settings.  If no new password is provided, keep the old one.\n");
     } else if(!strcmp(command, "accountSettings")) {
         coPrintf("accountSettings\n"
@@ -334,11 +312,10 @@ static void printHelp(
             "Stop following a thread\n");
     } else if(!strcmp(command, "announce")) {
         coPrintf("announce subject message\n"
-            "Announce a message to your community.  If you are a region leader, announce\n"
-            "to everyone in your region.  The supreme leader can announce globally.\n");
+            "Announce a message to everyone.  You must be the supreme leader.\n");
     } else if(!strcmp(command, "listAnnouncements")) {
         coPrintf("listAnnouncements\n"
-            "List announcements in your region.\n");
+            "List announcements.\n");
     } else if(!strcmp(command, "showAnnouncement")) {
         coPrintf("showAnnouncement announcementID\n"
             "Show an announcement.\n");
@@ -356,25 +333,13 @@ static void printHelp(
             "the list command.\n");
     } else if(!strcmp(command, "createCategory")) {
         coPrintf("createCategory category\n"
-            "Create a new category.  Only region managers can do this.\n");
+            "Create a new category.  Only the Supreme Leader can do this.\n");
     } else if(!strcmp(command, "deleteCategory")) {
         coPrintf("deleteCategory category\n"
-            "Delete a category.  Only region managers can do this.\n");
+            "Delete a category.  Only the Supreme Leader can do this.\n");
     } else if(!strcmp(command, "renameCategory")) {
         coPrintf("renameCategory oldName newName\n"
-            "Rename a category.  Only region managers can do this.\n");
-    } else if(!strcmp(command, "createRegion")) {
-        coPrintf("createRegion region\n"
-            "Create a new region.  Only the supreme leader can do this.\n");
-    } else if(!strcmp(command, "deleteRegion")) {
-        coPrintf("deleteRegion region\n"
-            "Destroy a region.  Only the supreme leader can do this.\n");
-    } else if(!strcmp(command, "renameRegion")) {
-        coPrintf("renameRegion oldName newName\n"
-            "Rename a region.  Only the supreme leader can do this.\n");
-    } else if(!strcmp(command, "setRegionManager")) {
-        coPrintf("setRegionManager userName (true/false)\n"
-            "Set the region manager flag on a user.  Only the supreme leader can do this.\n");
+            "Rename a category.  Only the Supreme Leader can do this.\n");
     } else if(!strcmp(command, "saveDatabase")) {
         coPrintf("saveDatabase\n"
             "If you are the supreme leader, you can overwrite the ASCII database, which\n"
@@ -473,25 +438,21 @@ static void processLoginCommand(
     uint32 argc,
     char **argv)
 {
-    meRegion region;
     meUser user;
     char *hashedPassword;
-    bool supremeLeader = false, regionManager = false;
+    bool supremeLeader = false;
     bool passwdOk;
 
     if(meCurrentUser != meUserNull) {
         supremeLeader = meUserSupremeLeader(meCurrentUser);
-        regionManager = meUserRegionManager(meCurrentUser);
-        region = meUserGetRegion(meCurrentUser);
     }
-    if(argc != 3 && !(argc == 2 && (supremeLeader || regionManager))) {
+    if(argc != 3 && !(argc == 2 && supremeLeader)) {
         coPrintf("Login requires a userName and a password.\n");
         return;
     } 
     user = meRootFindUser(meTheRoot, utSymCreate(utStringToLowerCase(argv[1])));
     if(user != meUserNull) {
-        passwdOk = supremeLeader || (regionManager && region == meUserGetRegion(user) &&
-            !meUserSupremeLeader(user));
+        passwdOk = supremeLeader;
         if(!passwdOk) {
             hashedPassword = hashPassword(meUserGetNounce(user), argv[2]);
             passwdOk = !memcmp(hashedPassword, meUserGetHashedPassword(user), NOUNCE_LENGTH);
@@ -502,7 +463,6 @@ static void processLoginCommand(
             }
             meUserSetLoggedIn(user, true);
             meCurrentUser = user;
-            meCurrentRegion = meUserGetRegion(user);
             meSessionSetUser(meCurrentSession, user);
             meUserSetSession(user, meCurrentSession);
             coPrintf("Login successful.  You have %s.\n", findBalance(meUserGetBalance(user)));
@@ -544,8 +504,6 @@ static void processStatusCommand(
         coPrintf("Logged in as user %s.", cgiEncode(meUserGetShownName(meCurrentUser)));
         if(meUserSupremeLeader(meCurrentUser)) {
             coPrintf("  You are the supreme leader.\n");
-        } else if(meUserRegionManager(meCurrentUser)) {
-            coPrintf("  You manage region %s.\n", cgiEncode(meRegionGetName(meUserGetRegion(meCurrentUser))));
         } else {
             coPrintf("\n");
         }
@@ -752,51 +710,6 @@ static void processTransactionsCommand(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Process a listRegions command.
---------------------------------------------------------------------------------------------------*/
-static void processListRegionsCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    bool hasItems = false;
-
-    if(argc != 1) {
-        printHelp(argv[0]);
-        return;
-    }
-    meForeachRootRegion(meTheRoot, region) {
-        coPrintf("%s (%u)\n", meRegionGetName(region), meRegionGetNumListings(region));
-        hasItems = true;
-    } meEndRootRegion;
-    if(!hasItems) {
-        coPrintf("There are no regions.\n");
-    }
-}
-
-/*--------------------------------------------------------------------------------------------------
-  Process a chooseRegions command.
---------------------------------------------------------------------------------------------------*/
-static void processChooseRegionCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    bool hasItems = false;
-
-    if(argc != 2) {
-        printHelp(argv[0]);
-        return;
-    }
-    region = meRootFindRegion(meTheRoot, utSymCreate(argv[1]));
-    if(region == meRegionNull) {
-        coPrintf("There is no region called '%s'.\n", argv[1]);
-        return;
-    }
-    meCurrentRegion = region;
-}
-
-/*--------------------------------------------------------------------------------------------------
   Process a list command.
 --------------------------------------------------------------------------------------------------*/
 static void processListCommand(
@@ -809,10 +722,6 @@ static void processListCommand(
 
     if(argc > 2) {
         printHelp(argv[0]);
-        return;
-    }
-    if(meCurrentRegion == meRegionNull) {
-        coPrintf("Please choose a region first.\n");
         return;
     }
     if(argc == 2) {
@@ -913,9 +822,8 @@ static meUser createNewUser(
     uint32 argc,
     char **argv)
 {
-    meRegion region;
     meUser user;
-    utSym userSym, regionSym, emailSym;
+    utSym userSym, emailSym;
     char *password, *nounce, *validationKey;
     char *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
@@ -939,25 +847,10 @@ static meUser createNewUser(
         coPrintf("E-mail address %s is already in use.\n", argv[3]);
         return meUserNull;
     }
-    regionSym = utSymCreate(argv[2]);
-    region = meRootFindRegion(meTheRoot, regionSym);
-    if(region == meRegionNull) {
-        if(meRootGetFirstUser(meTheRoot) != meUserNull &&
-                (meCurrentUser == meUserNull || !meUserSupremeLeader(meCurrentUser))) {
-            coPrintf("Region %s does not exist.  Contact Ebooks.coop to create a new one.\n",
-                argv[2]);
-            return;
-        }
-        region = meRegionAlloc();
-        meRegionSetSym(region, regionSym);
-        meRootInsertRegion(meTheRoot, region);
-    }
     user = meUserAlloc();
     meUserSetSym(user, userSym);
-    meUserSetShownName(user, argv[1], strlen(argv[1]) + 1);
+    meUserSetShownName(user, argv[2], strlen(argv[2]) + 1);
     meUserSetEmail(user, emailSym);
-    meRegionAppendUser(region, user);
-    meUserSetBalance(user, INITIAL_BALANCE);
     if(!meProcessingLogFile) {
         password = argv[4];
         nounce = cgiGenerateRandomID(NOUNCE_LENGTH);
@@ -979,7 +872,7 @@ static meUser createNewUser(
                 "Your password is: %s\n",
                 meUserGetShownName(user), cgiEncode(meUserGetName(user)), validationKey,
                 meUserGetShownName(user), password));
-        logCommand(7, argv);
+        logCommand(6, argv);
     } else {
         nounce = argv[4];
         meUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
@@ -990,7 +883,6 @@ static meUser createNewUser(
     }
     if(meRootGetFirstUser(meTheRoot) == meUserNull) {
         meUserSetSupremeLeader(user, true);
-        meUserSetRegionManager(user, true);
         coPrintf("User %s is the supreme leader.\n", meUserGetShownName(user));
     }
     meRootAppendUser(meTheRoot, user);
@@ -1088,9 +980,8 @@ static void processUpdateAccountCommand(
     uint32 argc,
     char **argv)
 {
-    meRegion region;
     meUser user;
-    utSym userSym, regionSym, emailSym;
+    utSym userSym, emailSym;
     char *email, *password, *nounce, *validationKey;
     char *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
@@ -1099,21 +990,21 @@ static void processUpdateAccountCommand(
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(meProcessingLogFile? argc != 4 && argc != 6 : argc != 5 && argc != 6) {
+    if(meProcessingLogFile? argc != 3 && argc != 5 : argc != 4 && argc != 5) {
         printHelp(argv[0]);
         return;
     }
     if(!meProcessingLogFile) {
-        hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), argv[4]);
+        hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), argv[3]);
         if(memcmp(hashedPassword, meUserGetHashedPassword(meCurrentUser), NOUNCE_LENGTH)) {
             coPrintf("Incorrect password.\n");
             return;
         }
     }
     userSym = utSymCreate(utStringToLowerCase(argv[1]));
-    emailSym = utSymCreate(argv[3]);
-    if(!emailValid(argv[3])) {
-        coPrintf("Email %s is not in a format we recognize.\n", argv[3]);
+    emailSym = utSymCreate(argv[2]);
+    if(!emailValid(argv[2])) {
+        coPrintf("Email %s is not in a format we recognize.\n", argv[2]);
         return;
     }
     user = meRootFindUser(meTheRoot, userSym);
@@ -1123,40 +1014,26 @@ static void processUpdateAccountCommand(
     }
     user = meRootFindByEmailUser(meTheRoot, emailSym);
     if(user != meUserNull && user != meCurrentUser) {
-        coPrintf("E-mail address %s is already in use.\n", argv[3]);
+        coPrintf("E-mail address %s is already in use.\n", argv[2]);
         return;
     }
-    regionSym = utSymCreate(argv[2]);
-    region = meRootFindRegion(meTheRoot, regionSym);
-    if(region == meRegionNull) {
-        if(meRootGetFirstUser(meTheRoot) != meUserNull &&
-                (meCurrentUser == meUserNull || !meUserSupremeLeader(meCurrentUser))) {
-            coPrintf("Region %s does not exist.  Contact Ebooks.coop to create a new one.\n",
-                argv[2]);
-            return;
-        }
-        region = meRegionAlloc();
-        meRegionSetSym(region, regionSym);
-        meRootInsertRegion(meTheRoot, region);
-    }
     if(!meProcessingLogFile) {
-        if(argc == 6) {
-            password = argv[5];
+        if(argc == 5) {
+            password = argv[4];
             nounce = cgiGenerateRandomID(NOUNCE_LENGTH);
             meUserSetNounce(meCurrentUser, nounce, NOUNCE_LENGTH + 1);
             hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), password);
             meUserSetHashedPassword(meCurrentUser, hashedPassword, SHA256_DIGEST_SIZE);
             strcpy(encodedHash, cgiEncodeArray(hashedPassword, SHA256_DIGEST_SIZE));
-            argv[4] = meUserGetNounce(meCurrentUser);
-            argv[5] = encodedHash;
-            argc = 6;
+            argv[3] = meUserGetNounce(meCurrentUser);
+            argv[4] = encodedHash;
         }
         logCommand(argc, argv);
     } else if(argc == 6) {
-        nounce = argv[4];
+        nounce = argv[3];
         meUserSetNounce(meCurrentUser, nounce, NOUNCE_LENGTH + 1);
-        cgiUnencode(argv[5]);
-        meUserSetHashedPassword(meCurrentUser, argv[5], SHA256_DIGEST_SIZE);
+        cgiUnencode(argv[4]);
+        meUserSetHashedPassword(meCurrentUser, argv[4], SHA256_DIGEST_SIZE);
     }
     if(meUserGetSym(meCurrentUser) != userSym) {
         meRootRenameUser(meTheRoot, meCurrentUser, userSym);
@@ -1165,8 +1042,6 @@ static void processUpdateAccountCommand(
     meRootRemoveByEmailUser(meTheRoot, meCurrentUser);
     meUserSetEmail(meCurrentUser, emailSym);
     meRootInsertByEmailUser(meTheRoot, meCurrentUser);
-    meRegionRemoveUser(meUserGetRegion(meCurrentUser), meCurrentUser);
-    meRegionAppendUser(region, meCurrentUser);
     coPrintf("Account updated succesfully.\n");
 }
 
@@ -1181,9 +1056,8 @@ static void processAccountSettingsCommand(
         coPrintf("Not currently logged in.\n");
         return;
     }
-    coPrintf("User %s, email %s", cgiEncode(meUserGetShownName(meCurrentUser)),
+    coPrintf("User %s, email %s\n", cgiEncode(meUserGetShownName(meCurrentUser)),
         utSymGetName(meUserGetEmail(meCurrentUser)));
-    coPrintf(", region %s\n", cgiEncode(meRegionGetName(meUserGetRegion(meCurrentUser))));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1335,8 +1209,6 @@ static void processDeleteMyAccountCommand(
     uint32 argc,
     char **argv)
 {
-    meRegion region;
-
     if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
@@ -1349,16 +1221,9 @@ static void processDeleteMyAccountCommand(
         printHelp(argv[0]);
         return;
     }
-    region = meUserGetRegion(meCurrentUser);
     coPrintf("Account %s deleted.\n", meUserGetShownName(meCurrentUser));
     logCommand(argc, argv);
     meUserDestroy(meCurrentUser);
-    if(meRegionGetFirstUser(region) == meUserNull) {
-        meRegionDestroy(region);
-        if(meCurrentRegion == region) {
-            meCurrentRegion = meRootGetFirstRegion(meTheRoot);
-        }
-    }
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1536,8 +1401,8 @@ static void processAnnounceCommand(
         printHelp(argv[0]);
         return;
     }
-    if(!meUserRegionManager(meCurrentUser) && !meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("You must be a region manager to post announcements.\n");
+    if(!meUserSupremeLeader(meCurrentUser)) {
+        coPrintf("You must be the Supreme Leader to post announcements.\n");
         return;
     }
     announcement = meAnnouncementAlloc();
@@ -1573,7 +1438,7 @@ static void processListAnnouncementsCommand(
     }
     meForeachRootAnnouncement(meTheRoot, announcement) {
         user = meAnnouncementGetUser(announcement);
-        if(meUserSupremeLeader(user) || meUserGetRegion(user) == meCurrentRegion) {
+        if(meUserSupremeLeader(user)) {
             coPrintf("%u %s\n", meAnnouncementGetID(announcement), cgiEncode(meAnnouncementGetSubject(announcement)));
             printedAnnouncement = true;
         }
@@ -1783,7 +1648,6 @@ static meListing meListingCreate(
     char *title,
     char *description)
 {
-    meRegion region = meUserGetRegion(user);
     meListing listing = meListingAlloc();
     uint64 listingID = meRootGetNextListingID(meTheRoot);
 
@@ -1798,7 +1662,6 @@ static meListing meListingCreate(
     meRootInsertListing(meTheRoot, listing);
     meUserAppendListing(user, listing);
     meCategorySetNumListings(category, meCategoryGetNumListings(category) + 1);
-    meRegionSetNumListings(region, meRegionGetNumListings(region) + 1);
     return listing;
 }
 
@@ -1814,8 +1677,6 @@ static void updateListing(
     char *title,
     char *description)
 {
-    meRegion region = meUserGetRegion(meListingGetUser(listing));
-
     meListingSetRate(listing, rate);
     meListingSetOffered(listing, offered);
     meListingSetFixedPrice(listing, fixedPrice);
@@ -1900,8 +1761,7 @@ static void processEditListingCommand(
         coPrintf("No listing %llu.\n", listingID);
         return;
     }
-    if(meListingGetUser(listing) != meCurrentUser && !meUserSupremeLeader(meCurrentUser) &&
-            !(meUserRegionManager(meCurrentUser) && meUserGetRegion(meListingGetUser(listing)) == meUserGetRegion(meCurrentUser))) {
+    if(meListingGetUser(listing) != meCurrentUser && !meUserSupremeLeader(meCurrentUser)) {
         coPrintf("You do not own this listing.\n");
         return;
     }
@@ -1937,7 +1797,6 @@ static void processDeleteListingCommand(
     char **argv)
 {
     meCategory category;
-    meRegion region;
     meListing listing;
     utSym categorySym;
     int64 listingID;
@@ -1963,10 +1822,8 @@ static void processDeleteListingCommand(
         return;
     }
     category = meListingGetCategory(listing);
-    region = meUserGetRegion(meListingGetUser(listing));
     meListingDestroy(listing);
     meCategorySetNumListings(category, meCategoryGetNumListings(category) - 1);
-    meRegionSetNumListings(region, meRegionGetNumListings(region) - 1);
     if(meCategoryGetFirstListing(category) == meListingNull) {
         meCategoryDestroy(category);
     }
@@ -1988,8 +1845,8 @@ static void processCreateCategoryCommand(
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!meUserRegionManager(meCurrentUser)) {
-        coPrintf("Only region managers can create categories.\n");
+    if(!meUserSupremeLeader(meCurrentUser)) {
+        coPrintf("Only the Supreme Leander can create categories.\n");
         return;
     }
     if(argc != 2) {
@@ -2023,8 +1880,8 @@ static void processDeleteCategoryCommand(
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!meUserRegionManager(meCurrentUser)) {
-        coPrintf("Only region managers can delete categories.\n");
+    if(!meUserSupremeLeader(meCurrentUser)) {
+        coPrintf("Only the Supreme Leader can delete categories.\n");
         return;
     }
     if(argc != 2) {
@@ -2056,8 +1913,8 @@ static void processRenameCategoryCommand(
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!meUserRegionManager(meCurrentUser)) {
-        coPrintf("Only region managers can rename categories.\n");
+    if(!meUserSupremeLeader(meCurrentUser)) {
+        coPrintf("Only the Supreme Leader can rename categories.\n");
         return;
     }
     if(argc != 3) {
@@ -2076,154 +1933,12 @@ static void processRenameCategoryCommand(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Process a createRegion command.
---------------------------------------------------------------------------------------------------*/
-static void processCreateRegionCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    utSym regionSym;
-
-    if(meCurrentUser == meUserNull) {
-        coPrintf("Not currently logged in.\n");
-        return;
-    }
-    if(!meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("Only the supreme leader can create regions.\n");
-        return;
-    }
-    if(argc != 2) {
-        printHelp(argv[0]);
-        return;
-    }
-    regionSym = utSymCreate(argv[1]);
-    region = meRootFindRegion(meTheRoot, regionSym);
-    if(region != meRegionNull) {
-        coPrintf("Region %s already exists.\n", argv[1]);
-        return;
-    }
-    region = meRegionAlloc();
-    meRegionSetSym(region, regionSym);
-    meRootInsertRegion(meTheRoot, region);
-    logCommand(argc, argv);
-    coPrintf("Region %s created.\n", argv[1]);
-}
-
-/*--------------------------------------------------------------------------------------------------
-  Process a deleteRegion command.
---------------------------------------------------------------------------------------------------*/
-static void processDeleteRegionCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    utSym regionSym;
-
-    if(meCurrentUser == meUserNull) {
-        coPrintf("Not currently logged in.\n");
-        return;
-    }
-    if(!meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("Only the supreme leader can delete regions.\n");
-        return;
-    }
-    if(argc != 2) {
-        printHelp(argv[0]);
-        return;
-    }
-    regionSym = utSymCreate(argv[1]);
-    region = meRootFindRegion(meTheRoot, regionSym);
-    if(region == meRegionNull) {
-        coPrintf("Region %s does not exist.\n", argv[1]);
-        return;
-    }
-    meRegionDestroy(region);
-    logCommand(argc, argv);
-    coPrintf("Region %s deleted.\n", argv[1]);
-}
-
-/*--------------------------------------------------------------------------------------------------
-  Process a renameRegion command.
---------------------------------------------------------------------------------------------------*/
-static void processRenameRegionCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    utSym regionSym;
-
-    if(meCurrentUser == meUserNull) {
-        coPrintf("Not currently logged in.\n");
-        return;
-    }
-    if(!meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("Only the supreme leader can rename regions.\n");
-        return;
-    }
-    if(argc != 3) {
-        printHelp(argv[0]);
-        return;
-    }
-    regionSym = utSymCreate(argv[1]);
-    region = meRootFindRegion(meTheRoot, regionSym);
-    if(region == meRegionNull) {
-        coPrintf("Region %s does not exist.\n", argv[1]);
-        return;
-    }
-    meRootRenameRegion(meTheRoot, region, utSymCreate(argv[2]));
-    logCommand(argc, argv);
-    coPrintf("Region %s renamed to %s.\n", argv[1], argv[2]);
-}
-
-/*--------------------------------------------------------------------------------------------------
-  Process a setRegionManager command.
---------------------------------------------------------------------------------------------------*/
-static void processSetRegionManagerCommand(
-    uint32 argc,
-    char **argv)
-{
-    meRegion region;
-    meUser user;
-
-    if(meCurrentUser == meUserNull) {
-        coPrintf("Not currently logged in.\n");
-        return;
-    }
-    if(!meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("Only the supreme leader can select region managers.\n");
-        return;
-    }
-    if(argc != 3) {
-        printHelp(argv[0]);
-        return;
-    }
-    user = meRootFindUser(meTheRoot, utSymCreate(argv[1]));
-    if(user == meUserNull) {
-        coPrintf("User %s does not exist.\n", argv[1]);
-        return;
-    }
-    if(!strcmp(argv[2], "true")) {
-        meUserSetRegionManager(user, true);
-        coPrintf("User %s set as region manager.\n", argv[1]);
-    } else if(!strcmp(argv[2], "false")) {
-        meUserSetRegionManager(user, false);
-        coPrintf("User %s removed as region manager.\n", argv[1]);
-    } else {
-        printHelp(argv[0]);
-        return;
-    }
-    logCommand(argc, argv);
-}
-
-/*--------------------------------------------------------------------------------------------------
   Save the database in ASCII
 --------------------------------------------------------------------------------------------------*/
 static void processSaveDatabaseCommand(
     uint32 argc,
     char **argv)
 {
-    meRegion region;
     meUser user;
     FILE *file;
 
@@ -2232,7 +1947,7 @@ static void processSaveDatabaseCommand(
         return;
     }
     if(!meUserSupremeLeader(meCurrentUser)) {
-        coPrintf("Only the supreme leader can select region managers.\n");
+        coPrintf("Only the supreme leader can save the database.\n");
         return;
     }
     if(argc != 1) {
@@ -2281,10 +1996,6 @@ static bool processCommand(
         processSendCommand(argc, argv);
     } else if(!strcmp(command, "transactions")) {
         processTransactionsCommand(argc, argv);
-    } else if(!strcmp(command, "listRegions")) {
-        processListRegionsCommand(argc, argv);
-    } else if(!strcmp(command, "chooseRegion")) {
-        processChooseRegionCommand(argc, argv);
     } else if(!strcmp(command, "list")) {
         processListCommand(argc, argv);
     } else if(!strcmp(command, "show")) {
@@ -2339,14 +2050,6 @@ static bool processCommand(
         processDeleteCategoryCommand(argc, argv);
     } else if(!strcmp(command, "renameCategory")) {
         processRenameCategoryCommand(argc, argv);
-    } else if(!strcmp(command, "createRegion")) {
-        processCreateRegionCommand(argc, argv);
-    } else if(!strcmp(command, "deleteRegion")) {
-        processDeleteRegionCommand(argc, argv);
-    } else if(!strcmp(command, "renameRegion")) {
-        processRenameRegionCommand(argc, argv);
-    } else if(!strcmp(command, "setRegionManager")) {
-        processSetRegionManagerCommand(argc, argv);
     } else if(!strcmp(command, "saveDatabase")) {
         processSaveDatabaseCommand(argc, argv);
     } else {
@@ -2376,16 +2079,13 @@ static bool switchSession(
     if(session == meSessionNull) {
         session = meSessionAlloc();
         meSessionSetSym(session, sym);
-        meSessionSetRegion(session, meRootGetFirstRegion(meTheRoot));
         meRootInsertSession(meTheRoot, session);
         meCurrentUser = meUserNull;
-        meCurrentRegion = meSessionGetRegion(session);
         meCurrentSession = session;
         return true;
     }
     meCurrentSession = session;
     meCurrentUser = meSessionGetUser(session);
-    meCurrentRegion = meSessionGetRegion(session);
     return false;
 }
 
@@ -2490,7 +2190,6 @@ int main(
     meDatabaseStart();
     meTheRoot = meRootAlloc();
     meCurrentUser = meUserNull;
-    meCurrentRegion = meRegionNull;
     meCurrentSession = meSessionNull;
     meLineSize = 42;
     meLineBuffer = utNewA(char, meLineSize);
@@ -2503,7 +2202,6 @@ int main(
         meProcessingLogFile = true;
         meLogFile = NULL;
         processFileCommands(LOG_FILE);
-        meCurrentRegion = meRootGetFirstRegion(meTheRoot);
     }
     meProcessingLogFile = false;
     meLogFile = fopen(LOG_FILE, "a");

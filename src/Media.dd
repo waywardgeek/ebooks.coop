@@ -9,7 +9,7 @@ class Root
 class Session
 
 class User
-    array char shownName // Differs by at only case from user name
+    array char shownName
     sym email
     uint64 joinDate
     bool active
