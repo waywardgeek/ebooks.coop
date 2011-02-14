@@ -190,7 +190,7 @@ static void printHelp(
             "    help\n"
             "    status\n"
             "    balance\n"
-            "    send userName amount note - send stars to an account\n"
+            "    send userName amount note - send money to an account\n"
             "    transactions [fromDate [toDate]] - list transactions\n"
             "    list [cateory]\n"
             "    show listingID\n"
@@ -240,7 +240,7 @@ static void printHelp(
         coPrintf("Report your balance.\n");
     } else if(!strcmp(command, "send")) {
         coPrintf("send userName amount note\n"
-            "Send stars from your account to someone else.  This is how you reward people\n"
+            "Send money from your account to someone else.  This is how you reward people\n"
             "for their services to you.  The amount should be whatever you agreed to.  You\n"
             " must make a note to yourself to remind you what this transaction is for.\n");
     } else if(!strcmp(command, "transactions")) {
@@ -274,9 +274,7 @@ static void printHelp(
             "Reset your password to a random string.  E-mail the new password to you.\n");
     } else if(!strcmp(command, "joinCharity")) {
         coPrintf("joinCharity charityName\n"
-            "Join a charity.  You must join at least one charity to validate your account.\n"
-            "When you validate your account, 1000 stars will be distributed among your\n"
-            "chosen charities.\n");
+            "Join a charity.  You must join at least one charity to validate your account.\n");
     } else if(!strcmp(command, "validateUser")) {
         coPrintf("validateUser userName key\n"
             "Validate the user account by providing a key which was e-mailed to their\n"
@@ -322,7 +320,7 @@ static void printHelp(
     } else if(!strcmp(command, "newListing")) {
         coPrintf("newListing (offered|wanted) category rate title description\n"
             "Create a new listing for a service you offer or want in a specific category.\n"
-            "The rate is in stars per hour unless you start with =, in which case\n"
+            "The rate is in US dollars per hour unless you start with =, in which case\n"
             "It's fixed price.\n");
     } else if(!strcmp(command, "editListing")) {
         coPrintf("editListing listintID (offered|wanted) category rate title description\n"
@@ -547,7 +545,7 @@ static bool readInt(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Process a send command to transfer stars.
+  Process a send command to transfer money.
 --------------------------------------------------------------------------------------------------*/
 static void processSendCommand(
     uint32 argc,
@@ -569,7 +567,7 @@ static void processSendCommand(
         return;
     }
     if(meCurrentUser == meUserNull) {
-        coPrintf("You must be logged in to send stars.\n");
+        coPrintf("You must be logged in to send money.\n");
         return;
     }
     otherUser = meRootFindUser(meTheRoot, utSymCreate(argv[1]));
@@ -581,7 +579,7 @@ static void processSendCommand(
         return;
     }
     if(amount > meUserGetBalance(meCurrentUser)) {
-        coPrintf("You do not have enough stars.\n");
+        coPrintf("You do not have enough money.\n");
         return;
     }
     transaction = meTransactionAlloc();
@@ -939,12 +937,14 @@ static void processNewUserCommand(
 {
     meUser user = createNewUser(argc, argv);
     meUser savedUser = meCurrentUser;
-    char *joinCharityCommand[2] = {"joinCharity", "Vinuxfoundation.org"};
+    meCharity charity = meRootGetFirstCharity(meTheRoot);
+    char *joinCharityCommand[2] = {"joinCharity",};
 
     if(user != meUserNull) {
-        if(!meProcessingLogFile) {
-            // This temp hack is until we have more than one charity
+        if(!meProcessingLogFile && charity != meCharityNull) {
+	    // Join the first charity by default
             meCurrentUser = user;
+	    joinCharityCommand[1] = meUserGetName(meCharityGetUser(charity));
             processJoinCharityCommand(2, joinCharityCommand);
             meCurrentUser = savedUser;
         }
@@ -1117,7 +1117,7 @@ static uint32 countUserCharities(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Donate stars to a charity.
+  Donate money to a charity.
 --------------------------------------------------------------------------------------------------*/
 static void donate(
     meCharity charity,
@@ -1128,7 +1128,7 @@ static void donate(
     uint32 balance = meUserGetBalance(user);
 
     if(balance < donation) {
-        coPrintf("Not enough stars in your account.\n");
+        coPrintf("Not enough money in your account.\n");
         return;
     }
     meUserSetBalance(user, balance - donation);
@@ -1136,17 +1136,17 @@ static void donate(
 }
 
 /*--------------------------------------------------------------------------------------------------
-  Distribute stars too this user's charities as evenly as possible.
+  Distribute money too this user's charities as evenly as possible.
 --------------------------------------------------------------------------------------------------*/
 static void distributeToCharity(
     meUser user,
-    uint32 numStars)
+    uint32 cents)
 {
     meCharity charity;
     meMembership membership;
     uint32 numCharities = countUserCharities(user);
-    uint32 amount = numStars/numCharities;
-    uint32 remainder = numStars - (amount*numCharities);
+    uint32 amount = cents/numCharities;
+    uint32 remainder = cents - (amount*numCharities);
     uint32 donation;
 
     meForeachUserMembership(user, membership) {
@@ -1189,13 +1189,6 @@ static void processValidateUserCommand(
     if(!meProcessingLogFile && memcmp(meUserGetValidationKey(user), argv[2], NOUNCE_LENGTH)) {
         coPrintf("Incorrect validation key.\n");
         return;
-    }
-    if(meUserGetCharity(user) == meCharityNull) {
-        if(meUserGetFirstMembership(user) == meMembershipNull) {
-            coPrintf("You must first join a charity before you can validate your account.\n");
-            return;
-        }
-        distributeToCharity(user, NEW_USER_DONATION);
     }
     meUserSetValidated(user, true);
     logCommand(argc, argv);
