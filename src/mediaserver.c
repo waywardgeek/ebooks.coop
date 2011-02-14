@@ -199,7 +199,7 @@ static void printHelp(
             "    deleteListing listingID\n"
             "For manipulating accounts:\n"
             "    newUser userName shownName email password\n"
-            "    newCharity userName email password\n"
+            "    newCharity userName shownName email password\n"
             "    updateAccount userName email oldPassword [password]\n"
             "    accountSettings\n"
             "    joinCharity charityName\n"
@@ -259,7 +259,7 @@ static void printHelp(
             "Create a new unvalidated user.  The user should receive an e-mail with\n"
             "a validation key.\n");
     } else if(!strcmp(command, "newCharity")) {
-        coPrintf("newCharity charityName email password\n"
+        coPrintf("newCharity charityName shownName email password\n"
             "Create a new charity, which is a special kind of user, representing a\n"
             "participating charity.  The user should receive an e-mail with\n"
             "a validation key.\n");
