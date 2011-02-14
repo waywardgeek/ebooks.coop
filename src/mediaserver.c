@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------------------------------
-  This is the main prgram for editing all data at ShareALot.org.  It usese Command Serializer
+  This is the main prgram for editing all data at Ebooks.coop.  It usese Command Serializer
   from comserial.sourceforge.net inorder to communicate with multiple users at once.  PHP scripts
   are then used to glue into Apache.
 --------------------------------------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 #include <time.h>
 #include "cgiutil.h"
 #include "sha256.h"
-#include "sadatabase.h"
+#include "medatabase.h"
 #include "comserver.h"
 
 #define MAX_ARGS 10
@@ -17,19 +17,19 @@
 #define MAX_RATE 200
 #define NEW_USER_DONATION 889
 #define INITIAL_BALANCE 1000
-#define LOG_FILE "sharealot.log"
-#define OLD_LOG_FILE "sharealot.log.old"
-#define DATABASE_FILE "sharealot.db"
+#define LOG_FILE "media.log"
+#define OLD_LOG_FILE "media.log.old"
+#define DATABASE_FILE "media.db"
 
-saRoot saTheRoot;
-static char *saLineBuffer;
-static uint32 saLineSize;
-static saSession saCurrentSession;
-static saUser saCurrentUser;
-static saRegion saCurrentRegion;
-static FILE *saLogFile;
-static bool saProcessingLogFile;
-static uint64 saCurrentTime;
+meRoot meTheRoot;
+static char *meLineBuffer;
+static uint32 meLineSize;
+static meSession meCurrentSession;
+static meUser meCurrentUser;
+static meRegion meCurrentRegion;
+static FILE *meLogFile;
+static bool meProcessingLogFile;
+static uint64 meCurrentTime;
 
 /*--------------------------------------------------------------------------------------------------
   Escape a string so that it can be passed inside single quotes in shell commands.
@@ -62,7 +62,7 @@ static void sendMail(
     char *subject,
     char *message)
 {
-    char *command = utSprintf("echo %s | mail -a 'From: admin@sharealot.org' -s %s %s",
+    char *command = utSprintf("echo %s | mail -a 'From: admin@Ebooks.coop' -s %s %s",
         escapeString(message), escapeString(subject), email);
 
     system(command);
@@ -73,37 +73,37 @@ static void sendMail(
   the formats of parameters.  Single quotes are not allowed in the message.
 --------------------------------------------------------------------------------------------------*/
 static void mailPost(
-    saUser user,
-    saPost post)
+    meUser user,
+    mePost post)
 {
-    saThread thread = saPostGetThread(post);
+    meThread thread = mePostGetThread(post);
 
-    if(saProcessingLogFile) {
+    if(meProcessingLogFile) {
         return;
     }
-    sendMail(utSymGetName(saUserGetEmail(user)), saThreadGetSubject(thread),
-        saPostGetMessage(post));
+    sendMail(utSymGetName(meUserGetEmail(user)), meThreadGetSubject(thread),
+        mePostGetMessage(post));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Send an announcement to a region, or globally.
 --------------------------------------------------------------------------------------------------*/
 static void sendAnnouncement(
-    saAnnouncement announcement)
+    meAnnouncement announcement)
 {
-    saUser sender = saAnnouncementGetUser(announcement);
-    saUser user;
-    char *subject = saAnnouncementGetSubject(announcement);
-    char *message = saAnnouncementGetMessage(announcement);
+    meUser sender = meAnnouncementGetUser(announcement);
+    meUser user;
+    char *subject = meAnnouncementGetSubject(announcement);
+    char *message = meAnnouncementGetMessage(announcement);
 
-    if(saUserSupremeLeader(sender)) {
-        saForeachRootUser(saTheRoot, user) {
-            sendMail(utSymGetName(saUserGetEmail(user)), subject, message);
-        } saEndRootUser;
+    if(meUserSupremeLeader(sender)) {
+        meForeachRootUser(meTheRoot, user) {
+            sendMail(utSymGetName(meUserGetEmail(user)), subject, message);
+        } meEndRootUser;
     } else {
-        saForeachRegionUser(saUserGetRegion(sender), user) {
-            sendMail(utSymGetName(saUserGetEmail(user)), subject, message);
-        } saEndRegionUser;
+        meForeachRegionUser(meUserGetRegion(sender), user) {
+            sendMail(utSymGetName(meUserGetEmail(user)), subject, message);
+        } meEndRegionUser;
     }
 }
 
@@ -113,12 +113,12 @@ static void sendAnnouncement(
 static void endSession(
     char *sessionID)
 {
-    saSession session = saRootFindSession(saTheRoot, utSymCreate(sessionID));
+    meSession session = meRootFindSession(meTheRoot, utSymCreate(sessionID));
 
-    if(session != saSessionNull) {
-        saSessionDestroy(session);
-        if(session == saCurrentSession) {
-            saCurrentSession = saSessionNull;
+    if(session != meSessionNull) {
+        meSessionDestroy(session);
+        if(session == meCurrentSession) {
+            meCurrentSession = meSessionNull;
         }
     }
 }
@@ -133,7 +133,7 @@ static bool readLine(
     int c;
 
     utDo {
-        if(saProcessingLogFile) {
+        if(meProcessingLogFile) {
             c = getc(file);
         } else {
             c = coGetc();
@@ -142,13 +142,13 @@ static bool readLine(
             return false;
         }
     } utWhile(c != '\n') {
-        if(linePosition + 1 == saLineSize) {
-            saLineSize <<= 1;
-            utResizeArray(saLineBuffer, saLineSize);
+        if(linePosition + 1 == meLineSize) {
+            meLineSize <<= 1;
+            utResizeArray(meLineBuffer, meLineSize);
         }
-        saLineBuffer[linePosition++] = c;
+        meLineBuffer[linePosition++] = c;
     } utRepeat;
-    saLineBuffer[linePosition] = '\0';
+    meLineBuffer[linePosition] = '\0';
     return true;
 }
 
@@ -165,24 +165,24 @@ static void logCommand(
     char timeBuf[100];
     struct tm *tm;
 
-    if(saLogFile == NULL) {
+    if(meLogFile == NULL) {
         return;
     }
     tm = localtime(&t);
     strftime(timeBuf, 100, "%x-%X", tm);
-    fprintf(saLogFile, "%s ", timeBuf);
-    if(saCurrentUser != saUserNull) {
-        fprintf(saLogFile, ":%s ", cgiEncode(saUserGetName(saCurrentUser)));
+    fprintf(meLogFile, "%s ", timeBuf);
+    if(meCurrentUser != meUserNull) {
+        fprintf(meLogFile, ":%s ", cgiEncode(meUserGetName(meCurrentUser)));
     }
     for(xArg = 0; xArg < argc; xArg++) {
         if(xArg != 0) {
-            fprintf(saLogFile, " ");
+            fprintf(meLogFile, " ");
         }
         encodedArg = cgiEncode(argv[xArg]);
-        fprintf(saLogFile, "%s", encodedArg);
+        fprintf(meLogFile, "%s", encodedArg);
     }
-    fprintf(saLogFile, "\n");
-    fflush(saLogFile);
+    fprintf(meLogFile, "\n");
+    fflush(meLogFile);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -509,10 +509,10 @@ static char *findBalance(
 --------------------------------------------------------------------------------------------------*/
 static void logout(void)
 {
-    saUserSetLoggedIn(saCurrentUser, false);
-    saUserSetSession(saCurrentUser, saSessionNull);
-    saSessionSetUser(saCurrentSession, saUserNull);
-    saCurrentUser = saUserNull;
+    meUserSetLoggedIn(meCurrentUser, false);
+    meUserSetSession(meCurrentUser, meSessionNull);
+    meSessionSetUser(meCurrentSession, meUserNull);
+    meCurrentUser = meUserNull;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -522,39 +522,39 @@ static void processLoginCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
-    saUser user;
+    meRegion region;
+    meUser user;
     char *hashedPassword;
     bool supremeLeader = false, regionManager = false;
     bool passwdOk;
 
-    if(saCurrentUser != saUserNull) {
-        supremeLeader = saUserSupremeLeader(saCurrentUser);
-        regionManager = saUserRegionManager(saCurrentUser);
-        region = saUserGetRegion(saCurrentUser);
+    if(meCurrentUser != meUserNull) {
+        supremeLeader = meUserSupremeLeader(meCurrentUser);
+        regionManager = meUserRegionManager(meCurrentUser);
+        region = meUserGetRegion(meCurrentUser);
     }
     if(argc != 3 && !(argc == 2 && (supremeLeader || regionManager))) {
         coPrintf("Login requires a userName and a password.\n");
         return;
     } 
-    user = saRootFindUser(saTheRoot, utSymCreate(utStringToLowerCase(argv[1])));
-    if(user != saUserNull) {
-        passwdOk = supremeLeader || (regionManager && region == saUserGetRegion(user) &&
-            !saUserSupremeLeader(user));
+    user = meRootFindUser(meTheRoot, utSymCreate(utStringToLowerCase(argv[1])));
+    if(user != meUserNull) {
+        passwdOk = supremeLeader || (regionManager && region == meUserGetRegion(user) &&
+            !meUserSupremeLeader(user));
         if(!passwdOk) {
-            hashedPassword = hashPassword(saUserGetNounce(user), argv[2]);
-            passwdOk = !memcmp(hashedPassword, saUserGetHashedPassword(user), NOUNCE_LENGTH);
+            hashedPassword = hashPassword(meUserGetNounce(user), argv[2]);
+            passwdOk = !memcmp(hashedPassword, meUserGetHashedPassword(user), NOUNCE_LENGTH);
         }
         if(passwdOk) {
-            if(saCurrentUser != saUserNull) {
+            if(meCurrentUser != meUserNull) {
                 logout();
             }
-            saUserSetLoggedIn(user, true);
-            saCurrentUser = user;
-            saCurrentRegion = saUserGetRegion(user);
-            saSessionSetUser(saCurrentSession, user);
-            saUserSetSession(user, saCurrentSession);
-            coPrintf("Login successful.  You have %s.\n", findBalance(saUserGetBalance(user)));
+            meUserSetLoggedIn(user, true);
+            meCurrentUser = user;
+            meCurrentRegion = meUserGetRegion(user);
+            meSessionSetUser(meCurrentSession, user);
+            meUserSetSession(user, meCurrentSession);
+            coPrintf("Login successful.  You have %s.\n", findBalance(meUserGetBalance(user)));
             return;
         }
     }
@@ -568,7 +568,7 @@ static void processLogoutCommand(
     uint32 argc,
     char **argv)
 {
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -587,14 +587,14 @@ static void processStatusCommand(
         printHelp(argv[0]);
         return;
     } 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not logged in.\n");
     } else {
-        coPrintf("Logged in as user %s.", cgiEncode(saUserGetShownName(saCurrentUser)));
-        if(saUserSupremeLeader(saCurrentUser)) {
+        coPrintf("Logged in as user %s.", cgiEncode(meUserGetShownName(meCurrentUser)));
+        if(meUserSupremeLeader(meCurrentUser)) {
             coPrintf("  You are the supreme leader.\n");
-        } else if(saUserRegionManager(saCurrentUser)) {
-            coPrintf("  You manage region %s.\n", cgiEncode(saRegionGetName(saUserGetRegion(saCurrentUser))));
+        } else if(meUserRegionManager(meCurrentUser)) {
+            coPrintf("  You manage region %s.\n", cgiEncode(meRegionGetName(meUserGetRegion(meCurrentUser))));
         } else {
             coPrintf("\n");
         }
@@ -612,10 +612,10 @@ static void processBalanceCommand(
         printHelp(argv[0]);
         return;
     } 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
     } else {
-        coPrintf("%s\n", findBalance(saUserGetBalance(saCurrentUser)));
+        coPrintf("%s\n", findBalance(meUserGetBalance(meCurrentUser)));
     }
 }
 
@@ -644,65 +644,65 @@ static void processSendCommand(
     uint32 argc,
     char **argv)
 {
-    saUser otherUser;
-    saTransaction transaction;
+    meUser otherUser;
+    meTransaction transaction;
     int64 amount, userBalance, otherBalance;
     uint64 t = time(NULL);
     char *endPtr;
     char userBalanceBuf[42], otherBalanceBuf[42];
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(saProcessingLogFile? argc != 6 : argc != 4) {
+    if(meProcessingLogFile? argc != 6 : argc != 4) {
         printHelp(argv[0]);
         return;
     }
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("You must be logged in to send stars.\n");
         return;
     }
-    otherUser = saRootFindUser(saTheRoot, utSymCreate(argv[1]));
-    if(otherUser == saUserNull) {
+    otherUser = meRootFindUser(meTheRoot, utSymCreate(argv[1]));
+    if(otherUser == meUserNull) {
         coPrintf("User %s not found\n", argv[1]);
         return;
     }
     if(!readInt(argv[2], &amount, true)) {
         return;
     }
-    if(amount > saUserGetBalance(saCurrentUser)) {
+    if(amount > meUserGetBalance(meCurrentUser)) {
         coPrintf("You do not have enough stars.\n");
         return;
     }
-    transaction = saTransactionAlloc();
-    saTransactionSetAmount(transaction, amount);
-    saTransactionSetDescription(transaction, argv[3], strlen(argv[3]) + 1);
-    saTransactionSetDate(transaction, t);
-    saUserAppendOutTransaction(saCurrentUser, transaction);
-    saUserAppendInTransaction(otherUser, transaction);
-    saUserSetBalance(saCurrentUser, saUserGetBalance(saCurrentUser) - amount);
-    saUserSetBalance(otherUser, saUserGetBalance(otherUser) + amount);
-    if(!saProcessingLogFile) {
-        sprintf(userBalanceBuf, "%u", saUserGetBalance(saCurrentUser));
+    transaction = meTransactionAlloc();
+    meTransactionSetAmount(transaction, amount);
+    meTransactionSetDescription(transaction, argv[3], strlen(argv[3]) + 1);
+    meTransactionSetDate(transaction, t);
+    meUserAppendOutTransaction(meCurrentUser, transaction);
+    meUserAppendInTransaction(otherUser, transaction);
+    meUserSetBalance(meCurrentUser, meUserGetBalance(meCurrentUser) - amount);
+    meUserSetBalance(otherUser, meUserGetBalance(otherUser) + amount);
+    if(!meProcessingLogFile) {
+        sprintf(userBalanceBuf, "%u", meUserGetBalance(meCurrentUser));
         argv[4] = userBalanceBuf;
-        sprintf(otherBalanceBuf, "%u", saUserGetBalance(otherUser));
+        sprintf(otherBalanceBuf, "%u", meUserGetBalance(otherUser));
         argv[5] = otherBalanceBuf;
         logCommand(6, argv);
     } else {
         if(!readInt(argv[4], &userBalance, true) ||
-                userBalance != saUserGetBalance(saCurrentUser)) {
-            coPrintf("Invalid user balance for user %s.\n", saUserGetName(saCurrentUser));
+                userBalance != meUserGetBalance(meCurrentUser)) {
+            coPrintf("Invalid user balance for user %s.\n", meUserGetName(meCurrentUser));
             exit(1);
         }
         if(!readInt(argv[5], &otherBalance, true) ||
-                otherBalance != saUserGetBalance(otherUser)) {
-            coPrintf("Invalid user balance for user %s.\n", saUserGetName(otherUser));
+                otherBalance != meUserGetBalance(otherUser)) {
+            coPrintf("Invalid user balance for user %s.\n", meUserGetName(otherUser));
             exit(1);
         }
     }
     coPrintf("Transaction completed successfully.  Your have %s.\n",
-        findBalance(saUserGetBalance(saCurrentUser)));
+        findBalance(meUserGetBalance(meCurrentUser)));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -712,10 +712,10 @@ static int compareTransactions(
     const void *transaction1Ptr,
     const void *transaction2Ptr)
 {
-    saTransaction transaction1 = *(saTransaction *)transaction1Ptr;
-    saTransaction transaction2 = *(saTransaction *)transaction2Ptr;
-    uint64 date1 = saTransactionGetDate(transaction1);
-    uint64 date2 = saTransactionGetDate(transaction2);
+    meTransaction transaction1 = *(meTransaction *)transaction1Ptr;
+    meTransaction transaction2 = *(meTransaction *)transaction2Ptr;
+    uint64 date1 = meTransactionGetDate(transaction1);
+    uint64 date2 = meTransactionGetDate(transaction2);
 
     if(date1 < date2) {
         return 1;
@@ -735,8 +735,8 @@ static void processTransactionsCommand(
     uint32 argc,
     char **argv)
 {
-    saTransaction transaction;
-    saTransactionArray tarray;
+    meTransaction transaction;
+    meTransactionArray tarray;
     uint64 fromDate = 0;
     uint64 toDate = UINT64_MAX;
     uint64 date;
@@ -745,7 +745,7 @@ static void processTransactionsCommand(
     time_t t;
     char *p;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -769,35 +769,35 @@ static void processTransactionsCommand(
             toDate = mktime(&tm);
         }
     }
-    tarray = saTransactionArrayAlloc();
-    saForeachUserOutTransaction(saCurrentUser, transaction) {
-        date = saTransactionGetDate(transaction);
+    tarray = meTransactionArrayAlloc();
+    meForeachUserOutTransaction(meCurrentUser, transaction) {
+        date = meTransactionGetDate(transaction);
         if(date >= fromDate && date <= toDate) {
-            saTransactionArrayAppendTransaction(tarray, transaction);
+            meTransactionArrayAppendTransaction(tarray, transaction);
         }
-    } saEndUserOutTransaction;
-    saForeachUserInTransaction(saCurrentUser, transaction) {
-        date = saTransactionGetDate(transaction);
+    } meEndUserOutTransaction;
+    meForeachUserInTransaction(meCurrentUser, transaction) {
+        date = meTransactionGetDate(transaction);
         if(date >= fromDate && date <= toDate) {
-            saTransactionArrayAppendTransaction(tarray, transaction);
+            meTransactionArrayAppendTransaction(tarray, transaction);
         }
-    } saEndUserInTransaction;
-    qsort(saTransactionArrayGetTransactions(tarray), saTransactionArrayGetUsedTransaction(tarray),
-        sizeof(saTransaction), compareTransactions);
-    saForeachTransactionArrayTransaction(tarray, transaction) {
-        t = saTransactionGetDate(transaction);
+    } meEndUserInTransaction;
+    qsort(meTransactionArrayGetTransactions(tarray), meTransactionArrayGetUsedTransaction(tarray),
+        sizeof(meTransaction), compareTransactions);
+    meForeachTransactionArrayTransaction(tarray, transaction) {
+        t = meTransactionGetDate(transaction);
         tmPtr = localtime(&t);
-        if(saTransactionGetFromUser(transaction) == saCurrentUser) {
+        if(meTransactionGetFromUser(transaction) == meCurrentUser) {
             coPrintf("%02d/%02d/%02d you sent %s %u - %s\n", tmPtr->tm_mon + 1, tmPtr->tm_mday,
-                tmPtr->tm_year - 100, saUserGetShownName(saTransactionGetToUser(transaction)),
-                saTransactionGetAmount(transaction), saTransactionGetDescription(transaction));
+                tmPtr->tm_year - 100, meUserGetShownName(meTransactionGetToUser(transaction)),
+                meTransactionGetAmount(transaction), meTransactionGetDescription(transaction));
         } else {
             coPrintf("%02d/%02d/%02d %s sent you %u - %s\n", tmPtr->tm_mon + 1, tmPtr->tm_mday,
-                tmPtr->tm_year - 100, saUserGetShownName(saTransactionGetFromUser(transaction)),
-                saTransactionGetAmount(transaction), saTransactionGetDescription(transaction));
+                tmPtr->tm_year - 100, meUserGetShownName(meTransactionGetFromUser(transaction)),
+                meTransactionGetAmount(transaction), meTransactionGetDescription(transaction));
         }
-    } saEndTransactionArrayTransaction;
-    saTransactionArrayFree(tarray);
+    } meEndTransactionArrayTransaction;
+    meTransactionArrayFree(tarray);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -807,17 +807,17 @@ static void processListRegionsCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
     bool hasItems = false;
 
     if(argc != 1) {
         printHelp(argv[0]);
         return;
     }
-    saForeachRootRegion(saTheRoot, region) {
-        coPrintf("%s (%u)\n", saRegionGetName(region), saRegionGetNumListings(region));
+    meForeachRootRegion(meTheRoot, region) {
+        coPrintf("%s (%u)\n", meRegionGetName(region), meRegionGetNumListings(region));
         hasItems = true;
-    } saEndRootRegion;
+    } meEndRootRegion;
     if(!hasItems) {
         coPrintf("There are no regions.\n");
     }
@@ -830,19 +830,19 @@ static void processChooseRegionCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
     bool hasItems = false;
 
     if(argc != 2) {
         printHelp(argv[0]);
         return;
     }
-    region = saRootFindRegion(saTheRoot, utSymCreate(argv[1]));
-    if(region == saRegionNull) {
+    region = meRootFindRegion(meTheRoot, utSymCreate(argv[1]));
+    if(region == meRegionNull) {
         coPrintf("There is no region called '%s'.\n", argv[1]);
         return;
     }
-    saCurrentRegion = region;
+    meCurrentRegion = region;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -852,41 +852,41 @@ static void processListCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category = saCategoryNull;
-    saListing listing;
+    meCategory category = meCategoryNull;
+    meListing listing;
     bool hasItems = false;
 
     if(argc > 2) {
         printHelp(argv[0]);
         return;
     }
-    if(saCurrentRegion == saRegionNull) {
+    if(meCurrentRegion == meRegionNull) {
         coPrintf("Please choose a region first.\n");
         return;
     }
     if(argc == 2) {
-        category = saRootFindCategory(saTheRoot, utSymCreate(argv[1]));
-        if(category == saCategoryNull) {
+        category = meRootFindCategory(meTheRoot, utSymCreate(argv[1]));
+        if(category == meCategoryNull) {
             coPrintf("Invalid category '%s'\n", argv[1]);
             return;
         }
     }
-    if(category != saCategoryNull) {
-        saForeachCategoryListing(category, listing) {
-            coPrintf("%s listingID=%llu\n", saListingGetTitle(listing), saListingGetID(listing));
+    if(category != meCategoryNull) {
+        meForeachCategoryListing(category, listing) {
+            coPrintf("%s listingID=%llu\n", meListingGetTitle(listing), meListingGetID(listing));
             hasItems = true;
-        } saEndCategoryListing;
+        } meEndCategoryListing;
         if(!hasItems) {
             coPrintf("There are no listings in this category.\n");
         }
     } else {
-        saForeachRootCategory(saTheRoot, category) {
-            //if(saCategoryGetNumListings(category) > 0) {
-                coPrintf("%s (%u)\n", saCategoryGetName(category),
-                    saCategoryGetNumListings(category));
+        meForeachRootCategory(meTheRoot, category) {
+            //if(meCategoryGetNumListings(category) > 0) {
+                coPrintf("%s (%u)\n", meCategoryGetName(category),
+                    meCategoryGetNumListings(category));
                 hasItems = true;
             //}
-        } saEndRootCategory;
+        } meEndRootCategory;
         if(!hasItems) {
             coPrintf("There are no categoreis.\n");
         }
@@ -900,7 +900,7 @@ static void processShowCommand(
     uint32 argc,
     char **argv)
 {
-    saListing listing;
+    meListing listing;
     uint64 listingID;
 
     if(argc != 2) {
@@ -910,19 +910,19 @@ static void processShowCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = saRootFindListing(saTheRoot, listingID);
-    if(listing == saListingNull) {
+    listing = meRootFindListing(meTheRoot, listingID);
+    if(listing == meListingNull) {
         coPrintf("Invalid listingID\n");
         return;
     }
-    coPrintf("%s: %s %s%u", saListingOffered(listing)? "Offered" : "Wanted",
-        cgiEncode(saListingGetTitle(listing)),
-        saListingFixedPrice(listing)? "cost=" : "rate=", saListingGetRate(listing));
+    coPrintf("%s: %s %s%u", meListingOffered(listing)? "Offered" : "Wanted",
+        cgiEncode(meListingGetTitle(listing)),
+        meListingFixedPrice(listing)? "cost=" : "rate=", meListingGetRate(listing));
     coPrintf(" user=%s",
-        cgiEncode(saUserGetShownName(saListingGetUser(listing))));
+        cgiEncode(meUserGetShownName(meListingGetUser(listing))));
     coPrintf(" category=%s listingID=%llu\n%s\n",
-        cgiEncode(saCategoryGetName(saListingGetCategory(listing))), listingID,
-        saListingGetDescription(listing));
+        cgiEncode(meCategoryGetName(meListingGetCategory(listing))), listingID,
+        meListingGetDescription(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -958,20 +958,20 @@ static bool emailValid(
 /*--------------------------------------------------------------------------------------------------
   Create a new user.
 --------------------------------------------------------------------------------------------------*/
-static saUser createNewUser(
+static meUser createNewUser(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
-    saUser user;
+    meRegion region;
+    meUser user;
     utSym userSym, regionSym, emailSym;
     char *password, *nounce, *validationKey;
     char *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
 
-    if(saProcessingLogFile? argc != 7 : argc != 5) {
+    if(meProcessingLogFile? argc != 7 : argc != 5) {
         printHelp(argv[0]);
-        return saUserNull;
+        return meUserNull;
     }
     userSym = utSymCreate(utStringToLowerCase(argv[1]));
     emailSym = utSymCreate(argv[3]);
@@ -979,71 +979,71 @@ static saUser createNewUser(
         coPrintf("Email %s is not in a format we recognize.\n", argv[3]);
         return;
     }
-    user = saRootFindUser(saTheRoot, userSym);
-    if(user != saUserNull) {
+    user = meRootFindUser(meTheRoot, userSym);
+    if(user != meUserNull) {
         coPrintf("User %s already exists.\n", argv[1]);
-        return saUserNull;
+        return meUserNull;
     }
-    if(saRootFindByEmailUser(saTheRoot, emailSym) != saUserNull) {
+    if(meRootFindByEmailUser(meTheRoot, emailSym) != meUserNull) {
         coPrintf("E-mail address %s is already in use.\n", argv[3]);
-        return saUserNull;
+        return meUserNull;
     }
     regionSym = utSymCreate(argv[2]);
-    region = saRootFindRegion(saTheRoot, regionSym);
-    if(region == saRegionNull) {
-        if(saRootGetFirstUser(saTheRoot) != saUserNull &&
-                (saCurrentUser == saUserNull || !saUserSupremeLeader(saCurrentUser))) {
-            coPrintf("Region %s does not exist.  Contact ShareALot.org to create a new one.\n",
+    region = meRootFindRegion(meTheRoot, regionSym);
+    if(region == meRegionNull) {
+        if(meRootGetFirstUser(meTheRoot) != meUserNull &&
+                (meCurrentUser == meUserNull || !meUserSupremeLeader(meCurrentUser))) {
+            coPrintf("Region %s does not exist.  Contact Ebooks.coop to create a new one.\n",
                 argv[2]);
             return;
         }
-        region = saRegionAlloc();
-        saRegionSetSym(region, regionSym);
-        saRootInsertRegion(saTheRoot, region);
+        region = meRegionAlloc();
+        meRegionSetSym(region, regionSym);
+        meRootInsertRegion(meTheRoot, region);
     }
-    user = saUserAlloc();
-    saUserSetSym(user, userSym);
-    saUserSetShownName(user, argv[1], strlen(argv[1]) + 1);
-    saUserSetEmail(user, emailSym);
-    saRegionAppendUser(region, user);
-    saUserSetBalance(user, INITIAL_BALANCE);
-    if(!saProcessingLogFile) {
+    user = meUserAlloc();
+    meUserSetSym(user, userSym);
+    meUserSetShownName(user, argv[1], strlen(argv[1]) + 1);
+    meUserSetEmail(user, emailSym);
+    meRegionAppendUser(region, user);
+    meUserSetBalance(user, INITIAL_BALANCE);
+    if(!meProcessingLogFile) {
         password = argv[4];
         nounce = cgiGenerateRandomID(NOUNCE_LENGTH);
-        saUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
-        hashedPassword = hashPassword(saUserGetNounce(user), password);
-        saUserSetHashedPassword(user, hashedPassword, SHA256_DIGEST_SIZE);
+        meUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
+        hashedPassword = hashPassword(meUserGetNounce(user), password);
+        meUserSetHashedPassword(user, hashedPassword, SHA256_DIGEST_SIZE);
         strcpy(encodedHash, cgiEncodeArray(hashedPassword, SHA256_DIGEST_SIZE));
         validationKey = cgiGenerateRandomID(NOUNCE_LENGTH);
-        saUserSetValidationKey(user, validationKey, NOUNCE_LENGTH + 1);
-        argv[4] = saUserGetNounce(user);
+        meUserSetValidationKey(user, validationKey, NOUNCE_LENGTH + 1);
+        argv[4] = meUserGetNounce(user);
         argv[5] = encodedHash;
-        argv[6] = saUserGetValidationKey(user);
-        sendMail(argv[3], "Welcome to ShareALot.org!", 
+        argv[6] = meUserGetValidationKey(user);
+        sendMail(argv[3], "Welcome to Ebooks.coop!", 
             utSprintf("Dear %s,\n\n"
-                "Thank you for registering at ShareALot.org.  To complete your registration, "
+                "Thank you for registering at Ebooks.coop.  To complete your registration, "
                 "please visit this url:\n\n"
-                "    http://www.sharealot.org/validate.php?user=%s&key=%s\n\n"
+                "    http://Ebooks.coop/validate.php?user=%s&key=%s\n\n"
                 "Your user name is: %s\n"
                 "Your password is: %s\n",
-                saUserGetShownName(user), cgiEncode(saUserGetName(user)), validationKey,
-                saUserGetShownName(user), password));
+                meUserGetShownName(user), cgiEncode(meUserGetName(user)), validationKey,
+                meUserGetShownName(user), password));
         logCommand(7, argv);
     } else {
         nounce = argv[4];
-        saUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
+        meUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
         cgiUnencode(argv[5]);
-        saUserSetHashedPassword(user, argv[5], SHA256_DIGEST_SIZE);
+        meUserSetHashedPassword(user, argv[5], SHA256_DIGEST_SIZE);
         validationKey = argv[6];
-        saUserSetValidationKey(user, validationKey, NOUNCE_LENGTH + 1);
+        meUserSetValidationKey(user, validationKey, NOUNCE_LENGTH + 1);
     }
-    if(saRootGetFirstUser(saTheRoot) == saUserNull) {
-        saUserSetSupremeLeader(user, true);
-        saUserSetRegionManager(user, true);
-        coPrintf("User %s is the supreme leader.\n", saUserGetShownName(user));
+    if(meRootGetFirstUser(meTheRoot) == meUserNull) {
+        meUserSetSupremeLeader(user, true);
+        meUserSetRegionManager(user, true);
+        coPrintf("User %s is the supreme leader.\n", meUserGetShownName(user));
     }
-    saRootAppendUser(saTheRoot, user);
-    saRootInsertByEmailUser(saTheRoot, user);
+    meRootAppendUser(meTheRoot, user);
+    meRootInsertByEmailUser(meTheRoot, user);
     return user;
 }
 
@@ -1054,11 +1054,11 @@ static void processJoinCharityCommand(
     uint32 argc,
     char **argv)
 {
-    saUser user;
-    saCharity charity;
-    saMembership membership;
+    meUser user;
+    meCharity charity;
+    meMembership membership;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1066,25 +1066,25 @@ static void processJoinCharityCommand(
         printHelp(argv[0]);
         return;
     }
-    user = saRootFindUser(saTheRoot, utSymCreate(argv[1]));
-    if(user == saUserNull) {
+    user = meRootFindUser(meTheRoot, utSymCreate(argv[1]));
+    if(user == meUserNull) {
         coPrintf("No charity named '%s' found.\n", argv[1]);
         return;
     }
-    charity = saUserGetCharity(user);
-    if(charity == saCharityNull) {
+    charity = meUserGetCharity(user);
+    if(charity == meCharityNull) {
         coPrintf("User '%s' is not a charity.\n", argv[1]);
         return;
     }
-    if(saUserFindMembership(saCurrentUser, charity) != saMembershipNull) {
+    if(meUserFindMembership(meCurrentUser, charity) != meMembershipNull) {
         coPrintf("Already belong to charity %s\n", argv[1]);
         return;
     }
-    membership = saMembershipAlloc();
-    saCharityAppendMembership(charity, membership);
-    saUserAppendMembership(saCurrentUser, membership);
+    membership = meMembershipAlloc();
+    meCharityAppendMembership(charity, membership);
+    meUserAppendMembership(meCurrentUser, membership);
     logCommand(argc, argv);
-    coPrintf("%s joined charity %s successfully.\n", saUserGetShownName(saCurrentUser), argv[1]);
+    coPrintf("%s joined charity %s successfully.\n", meUserGetShownName(meCurrentUser), argv[1]);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1094,19 +1094,19 @@ static void processNewUserCommand(
     uint32 argc,
     char **argv)
 {
-    saUser user = createNewUser(argc, argv);
-    saUser savedUser = saCurrentUser;
-    char *joinCharityCommand[2] = {"joinCharity", "sharealot.org"};
+    meUser user = createNewUser(argc, argv);
+    meUser savedUser = meCurrentUser;
+    char *joinCharityCommand[2] = {"joinCharity", "Vinuxfoundation.org"};
 
-    if(user != saUserNull) {
-        if(!saProcessingLogFile) {
+    if(user != meUserNull) {
+        if(!meProcessingLogFile) {
             // This temp hack is until we have more than one charity
-            saCurrentUser = user;
+            meCurrentUser = user;
             processJoinCharityCommand(2, joinCharityCommand);
-            saCurrentUser = savedUser;
+            meCurrentUser = savedUser;
         }
-        coPrintf("New user %s created with validation key %s.\n", saUserGetShownName(user),
-            saUserGetValidationKey(user));
+        coPrintf("New user %s created with validation key %s.\n", meUserGetShownName(user),
+            meUserGetValidationKey(user));
     }
 }
 
@@ -1117,17 +1117,17 @@ static void processNewCharityCommand(
     uint32 argc,
     char **argv)
 {
-    saCharity charity;
-    saUser user = createNewUser(argc, argv);
+    meCharity charity;
+    meUser user = createNewUser(argc, argv);
 
-    if(user == saUserNull) {
+    if(user == meUserNull) {
         return;
     }
-    charity = saCharityAlloc();
-    saRootAppendCharity(saTheRoot, charity);
-    saUserInsertCharity(user, charity);
-    coPrintf("New charity %s created with validation key %s.\n", saUserGetShownName(user),
-        saUserGetValidationKey(user));
+    charity = meCharityAlloc();
+    meRootAppendCharity(meTheRoot, charity);
+    meUserInsertCharity(user, charity);
+    coPrintf("New charity %s created with validation key %s.\n", meUserGetShownName(user),
+        meUserGetValidationKey(user));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1137,24 +1137,24 @@ static void processUpdateAccountCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
-    saUser user;
+    meRegion region;
+    meUser user;
     utSym userSym, regionSym, emailSym;
     char *email, *password, *nounce, *validationKey;
     char *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(saProcessingLogFile? argc != 4 && argc != 6 : argc != 5 && argc != 6) {
+    if(meProcessingLogFile? argc != 4 && argc != 6 : argc != 5 && argc != 6) {
         printHelp(argv[0]);
         return;
     }
-    if(!saProcessingLogFile) {
-        hashedPassword = hashPassword(saUserGetNounce(saCurrentUser), argv[4]);
-        if(memcmp(hashedPassword, saUserGetHashedPassword(saCurrentUser), NOUNCE_LENGTH)) {
+    if(!meProcessingLogFile) {
+        hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), argv[4]);
+        if(memcmp(hashedPassword, meUserGetHashedPassword(meCurrentUser), NOUNCE_LENGTH)) {
             coPrintf("Incorrect password.\n");
             return;
         }
@@ -1165,57 +1165,57 @@ static void processUpdateAccountCommand(
         coPrintf("Email %s is not in a format we recognize.\n", argv[3]);
         return;
     }
-    user = saRootFindUser(saTheRoot, userSym);
-    if(user != saUserNull && user != saCurrentUser) {
+    user = meRootFindUser(meTheRoot, userSym);
+    if(user != meUserNull && user != meCurrentUser) {
         coPrintf("User %s already exists.\n", argv[1]);
         return;
     }
-    user = saRootFindByEmailUser(saTheRoot, emailSym);
-    if(user != saUserNull && user != saCurrentUser) {
+    user = meRootFindByEmailUser(meTheRoot, emailSym);
+    if(user != meUserNull && user != meCurrentUser) {
         coPrintf("E-mail address %s is already in use.\n", argv[3]);
         return;
     }
     regionSym = utSymCreate(argv[2]);
-    region = saRootFindRegion(saTheRoot, regionSym);
-    if(region == saRegionNull) {
-        if(saRootGetFirstUser(saTheRoot) != saUserNull &&
-                (saCurrentUser == saUserNull || !saUserSupremeLeader(saCurrentUser))) {
-            coPrintf("Region %s does not exist.  Contact ShareALot.org to create a new one.\n",
+    region = meRootFindRegion(meTheRoot, regionSym);
+    if(region == meRegionNull) {
+        if(meRootGetFirstUser(meTheRoot) != meUserNull &&
+                (meCurrentUser == meUserNull || !meUserSupremeLeader(meCurrentUser))) {
+            coPrintf("Region %s does not exist.  Contact Ebooks.coop to create a new one.\n",
                 argv[2]);
             return;
         }
-        region = saRegionAlloc();
-        saRegionSetSym(region, regionSym);
-        saRootInsertRegion(saTheRoot, region);
+        region = meRegionAlloc();
+        meRegionSetSym(region, regionSym);
+        meRootInsertRegion(meTheRoot, region);
     }
-    if(!saProcessingLogFile) {
+    if(!meProcessingLogFile) {
         if(argc == 6) {
             password = argv[5];
             nounce = cgiGenerateRandomID(NOUNCE_LENGTH);
-            saUserSetNounce(saCurrentUser, nounce, NOUNCE_LENGTH + 1);
-            hashedPassword = hashPassword(saUserGetNounce(saCurrentUser), password);
-            saUserSetHashedPassword(saCurrentUser, hashedPassword, SHA256_DIGEST_SIZE);
+            meUserSetNounce(meCurrentUser, nounce, NOUNCE_LENGTH + 1);
+            hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), password);
+            meUserSetHashedPassword(meCurrentUser, hashedPassword, SHA256_DIGEST_SIZE);
             strcpy(encodedHash, cgiEncodeArray(hashedPassword, SHA256_DIGEST_SIZE));
-            argv[4] = saUserGetNounce(saCurrentUser);
+            argv[4] = meUserGetNounce(meCurrentUser);
             argv[5] = encodedHash;
             argc = 6;
         }
         logCommand(argc, argv);
     } else if(argc == 6) {
         nounce = argv[4];
-        saUserSetNounce(saCurrentUser, nounce, NOUNCE_LENGTH + 1);
+        meUserSetNounce(meCurrentUser, nounce, NOUNCE_LENGTH + 1);
         cgiUnencode(argv[5]);
-        saUserSetHashedPassword(saCurrentUser, argv[5], SHA256_DIGEST_SIZE);
+        meUserSetHashedPassword(meCurrentUser, argv[5], SHA256_DIGEST_SIZE);
     }
-    if(saUserGetSym(saCurrentUser) != userSym) {
-        saRootRenameUser(saTheRoot, saCurrentUser, userSym);
+    if(meUserGetSym(meCurrentUser) != userSym) {
+        meRootRenameUser(meTheRoot, meCurrentUser, userSym);
     }
-    saUserSetShownName(saCurrentUser, argv[1], strlen(argv[1]) + 1);
-    saRootRemoveByEmailUser(saTheRoot, saCurrentUser);
-    saUserSetEmail(saCurrentUser, emailSym);
-    saRootInsertByEmailUser(saTheRoot, saCurrentUser);
-    saRegionRemoveUser(saUserGetRegion(saCurrentUser), saCurrentUser);
-    saRegionAppendUser(region, saCurrentUser);
+    meUserSetShownName(meCurrentUser, argv[1], strlen(argv[1]) + 1);
+    meRootRemoveByEmailUser(meTheRoot, meCurrentUser);
+    meUserSetEmail(meCurrentUser, emailSym);
+    meRootInsertByEmailUser(meTheRoot, meCurrentUser);
+    meRegionRemoveUser(meUserGetRegion(meCurrentUser), meCurrentUser);
+    meRegionAppendUser(region, meCurrentUser);
     coPrintf("Account updated succesfully.\n");
 }
 
@@ -1226,13 +1226,13 @@ static void processAccountSettingsCommand(
     uint32 argc,
     char **argv)
 {
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    coPrintf("User %s, email %s", cgiEncode(saUserGetShownName(saCurrentUser)),
-        utSymGetName(saUserGetEmail(saCurrentUser)));
-    coPrintf(", region %s\n", cgiEncode(saRegionGetName(saUserGetRegion(saCurrentUser))));
+    coPrintf("User %s, email %s", cgiEncode(meUserGetShownName(meCurrentUser)),
+        utSymGetName(meUserGetEmail(meCurrentUser)));
+    coPrintf(", region %s\n", cgiEncode(meRegionGetName(meUserGetRegion(meCurrentUser))));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1242,52 +1242,52 @@ static void processResetPasswordCommand(
     uint32 argc,
     char **argv)
 { 
-    saUser user;
+    meUser user;
     char *nounce, *password, *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
 
-    if(saProcessingLogFile? argc!= 4 : argc != 2) {
+    if(meProcessingLogFile? argc!= 4 : argc != 2) {
         printHelp(argv[0]);
         return;
     }
-    user = saRootFindUser(saTheRoot, utSymCreate(utStringToLowerCase(argv[1])));
-    if(user == saUserNull) {
+    user = meRootFindUser(meTheRoot, utSymCreate(utStringToLowerCase(argv[1])));
+    if(user == meUserNull) {
         coPrintf("User not found.\n");
         return;
     }
-    if(!saProcessingLogFile) {
+    if(!meProcessingLogFile) {
         nounce = cgiGenerateRandomID(NOUNCE_LENGTH);
-        saUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
+        meUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
         password = cgiGenerateRandomID(8);
-        hashedPassword = hashPassword(saUserGetNounce(user), password);
-        saUserSetHashedPassword(user, hashedPassword, SHA256_DIGEST_SIZE);
+        hashedPassword = hashPassword(meUserGetNounce(user), password);
+        meUserSetHashedPassword(user, hashedPassword, SHA256_DIGEST_SIZE);
         strcpy(encodedHash, cgiEncodeArray(hashedPassword, SHA256_DIGEST_SIZE));
-        argv[2] = saUserGetNounce(user);
+        argv[2] = meUserGetNounce(user);
         argv[3] = encodedHash;
         logCommand(4, argv);
-        sendMail(utSymGetName(saUserGetEmail(user)), "Your new ShareALot.org password",
-            utSprintf("You have reset your password at ShareALot.org.  "
+        sendMail(utSymGetName(meUserGetEmail(user)), "Your new Ebooks.coop password",
+            utSprintf("You have reset your password at Ebooks.coop.  "
             "Your new password is:\n\npassword: %s\n", password));
     } else {
-        saUserSetNounce(user, argv[2], NOUNCE_LENGTH + 1);
+        meUserSetNounce(user, argv[2], NOUNCE_LENGTH + 1);
         cgiUnencode(argv[3]);
-        saUserSetHashedPassword(user, argv[3], SHA256_DIGEST_SIZE);
+        meUserSetHashedPassword(user, argv[3], SHA256_DIGEST_SIZE);
     }
-    coPrintf("Password reset for user %s.\n", saUserGetShownName(user));
+    coPrintf("Password reset for user %s.\n", meUserGetShownName(user));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Just count the number of charities a user belongs to.
 --------------------------------------------------------------------------------------------------*/
 static uint32 countUserCharities(
-    saUser user)
+    meUser user)
 {
-    saMembership membership;
+    meMembership membership;
     uint32 numCharities = 0;
 
-    saForeachUserMembership(user, membership) {
+    meForeachUserMembership(user, membership) {
         numCharities++;
-    } saEndUserMembership;
+    } meEndUserMembership;
     return numCharities;
 }
 
@@ -1295,37 +1295,37 @@ static uint32 countUserCharities(
   Donate stars to a charity.
 --------------------------------------------------------------------------------------------------*/
 static void donate(
-    saCharity charity,
-    saUser user,
+    meCharity charity,
+    meUser user,
     uint32 donation)
 {
-    saUser charityManager = saCharityGetUser(charity);
-    uint32 balance = saUserGetBalance(user);
+    meUser charityManager = meCharityGetUser(charity);
+    uint32 balance = meUserGetBalance(user);
 
     if(balance < donation) {
         coPrintf("Not enough stars in your account.\n");
         return;
     }
-    saUserSetBalance(user, balance - donation);
-    saUserSetBalance(charityManager, saUserGetBalance(charityManager) + donation);
+    meUserSetBalance(user, balance - donation);
+    meUserSetBalance(charityManager, meUserGetBalance(charityManager) + donation);
 }
 
 /*--------------------------------------------------------------------------------------------------
   Distribute stars too this user's charities as evenly as possible.
 --------------------------------------------------------------------------------------------------*/
 static void distributeToCharity(
-    saUser user,
+    meUser user,
     uint32 numStars)
 {
-    saCharity charity;
-    saMembership membership;
+    meCharity charity;
+    meMembership membership;
     uint32 numCharities = countUserCharities(user);
     uint32 amount = numStars/numCharities;
     uint32 remainder = numStars - (amount*numCharities);
     uint32 donation;
 
-    saForeachUserMembership(user, membership) {
-        charity = saMembershipGetCharity(membership);
+    meForeachUserMembership(user, membership) {
+        charity = meMembershipGetCharity(membership);
         if(remainder > 0) {
             donation = amount + 1;
             remainder--;
@@ -1333,7 +1333,7 @@ static void distributeToCharity(
             donation = amount;
         }
         donate(charity, user, donation);
-    } saEndUserMembership;
+    } meEndUserMembership;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1343,7 +1343,7 @@ static void processValidateUserCommand(
     uint32 argc,
     char **argv)
 {
-    saUser user;
+    meUser user;
     utSym userSym;
     char key[NOUNCE_LENGTH];
 
@@ -1352,8 +1352,8 @@ static void processValidateUserCommand(
         return;
     }
     userSym = utSymCreate(utStringToLowerCase(argv[1]));
-    user = saRootFindUser(saTheRoot, userSym);
-    if(user == saUserNull) {
+    user = meRootFindUser(meTheRoot, userSym);
+    if(user == meUserNull) {
         coPrintf("Invalid user %s\n", argv[1]);
         return;
     }
@@ -1361,18 +1361,18 @@ static void processValidateUserCommand(
         coPrintf("Invalid validation key\n");
         return;
     }
-    if(!saProcessingLogFile && memcmp(saUserGetValidationKey(user), argv[2], NOUNCE_LENGTH)) {
+    if(!meProcessingLogFile && memcmp(meUserGetValidationKey(user), argv[2], NOUNCE_LENGTH)) {
         coPrintf("Incorrect validation key.\n");
         return;
     }
-    if(saUserGetCharity(user) == saCharityNull) {
-        if(saUserGetFirstMembership(user) == saMembershipNull) {
+    if(meUserGetCharity(user) == meCharityNull) {
+        if(meUserGetFirstMembership(user) == meMembershipNull) {
             coPrintf("You must first join a charity before you can validate your account.\n");
             return;
         }
         distributeToCharity(user, NEW_USER_DONATION);
     }
-    saUserSetValidated(user, true);
+    meUserSetValidated(user, true);
     logCommand(argc, argv);
     coPrintf("User %s validated.\n", argv[1]);
 }
@@ -1384,13 +1384,13 @@ static void processDeleteMyAccountCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(saUserGetFirstInTransaction(saCurrentUser) != saTransactionNull) {
+    if(meUserGetFirstInTransaction(meCurrentUser) != meTransactionNull) {
         coPrintf("Can't delete users with completed transactions.\n");
         return;
     }
@@ -1398,14 +1398,14 @@ static void processDeleteMyAccountCommand(
         printHelp(argv[0]);
         return;
     }
-    region = saUserGetRegion(saCurrentUser);
-    coPrintf("Account %s deleted.\n", saUserGetShownName(saCurrentUser));
+    region = meUserGetRegion(meCurrentUser);
+    coPrintf("Account %s deleted.\n", meUserGetShownName(meCurrentUser));
     logCommand(argc, argv);
-    saUserDestroy(saCurrentUser);
-    if(saRegionGetFirstUser(region) == saUserNull) {
-        saRegionDestroy(region);
-        if(saCurrentRegion == region) {
-            saCurrentRegion = saRootGetFirstRegion(saTheRoot);
+    meUserDestroy(meCurrentUser);
+    if(meRegionGetFirstUser(region) == meUserNull) {
+        meRegionDestroy(region);
+        if(meCurrentRegion == region) {
+            meCurrentRegion = meRootGetFirstRegion(meTheRoot);
         }
     }
 }
@@ -1421,30 +1421,30 @@ static void processChangePasswordCommand(
     char *hashedPassword;
     char encodedHash[SHA256_DIGEST_SIZE*3+1];
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(saProcessingLogFile? argc != 2 : argc != 3) {
+    if(meProcessingLogFile? argc != 2 : argc != 3) {
         printHelp(argv[0]);
         return;
     }
-    if(!saProcessingLogFile) {
+    if(!meProcessingLogFile) {
         oldPassword = argv[1];
         newPassword = argv[2];
-        hashedPassword = hashPassword(saUserGetNounce(saCurrentUser), oldPassword);
-        if(memcmp(hashedPassword, saUserGetHashedPassword(saCurrentUser), SHA256_DIGEST_SIZE)) {
+        hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), oldPassword);
+        if(memcmp(hashedPassword, meUserGetHashedPassword(meCurrentUser), SHA256_DIGEST_SIZE)) {
             coPrintf("Incorrect password.\n");
             return;
         }
-        hashedPassword = hashPassword(saUserGetNounce(saCurrentUser), newPassword);
-        saUserSetHashedPassword(saCurrentUser, hashedPassword, SHA256_DIGEST_SIZE);
+        hashedPassword = hashPassword(meUserGetNounce(meCurrentUser), newPassword);
+        meUserSetHashedPassword(meCurrentUser, hashedPassword, SHA256_DIGEST_SIZE);
         strcpy(encodedHash, cgiEncodeArray(hashedPassword, SHA256_DIGEST_SIZE));
         argv[1] = encodedHash;
         logCommand(2, argv);
     } else {
         cgiUnencode(argv[1]);
-        saUserSetHashedPassword(saCurrentUser, argv[1], SHA256_DIGEST_SIZE);
+        meUserSetHashedPassword(meCurrentUser, argv[1], SHA256_DIGEST_SIZE);
     }
     coPrintf("Succesfully changed password.\n");
 }
@@ -1452,55 +1452,55 @@ static void processChangePasswordCommand(
 /*--------------------------------------------------------------------------------------------------
   Create a new post.
 --------------------------------------------------------------------------------------------------*/
-static saPost saPostCreate(
-    saUser user,
-    saThread thread,
+static mePost mePostCreate(
+    meUser user,
+    meThread thread,
     char *message)
 {
-    saPost post = saPostAlloc();
-    uint32 postID = saRootGetNextPostID(saTheRoot);
+    mePost post = mePostAlloc();
+    uint32 postID = meRootGetNextPostID(meTheRoot);
 
-    saPostSetID(post, postID);
-    saRootSetNextPostID(saTheRoot, postID + 1);
-    saPostSetMessage(post, message, strlen(message) + 1);
-    saUserAppendPost(user, post);
-    saThreadAppendPost(thread, post);
-    saRootAppendPost(saTheRoot, post);
-    saThreadSetNumPosts(thread, saThreadGetNumPosts(thread) + 1);
+    mePostSetID(post, postID);
+    meRootSetNextPostID(meTheRoot, postID + 1);
+    mePostSetMessage(post, message, strlen(message) + 1);
+    meUserAppendPost(user, post);
+    meThreadAppendPost(thread, post);
+    meRootAppendPost(meTheRoot, post);
+    meThreadSetNumPosts(thread, meThreadGetNumPosts(thread) + 1);
     return post;
 }
 
 /*--------------------------------------------------------------------------------------------------
   Find a subscription for the user and thread.
 --------------------------------------------------------------------------------------------------*/
-static saSubscription findSubscription(
-    saUser user,
-    saThread thread)
+static meSubscription findSubscription(
+    meUser user,
+    meThread thread)
 {
-    saSubscription subscription;
+    meSubscription subscription;
 
-    saForeachUserSubscription(user, subscription) {
-        if(saSubscriptionGetThread(subscription) == thread) {
+    meForeachUserSubscription(user, subscription) {
+        if(meSubscriptionGetThread(subscription) == thread) {
             return subscription;
         }
-    } saEndUserSubscription;
-    return saSubscriptionNull;
+    } meEndUserSubscription;
+    return meSubscriptionNull;
 }
 
 /*--------------------------------------------------------------------------------------------------
   Follow the thread, if we don't already.
 --------------------------------------------------------------------------------------------------*/
 static void followThread(
-    saThread thread)
+    meThread thread)
 {
-    saSubscription subscription = findSubscription(saCurrentUser, thread);
+    meSubscription subscription = findSubscription(meCurrentUser, thread);
 
-    if(subscription != saSubscriptionNull) {
+    if(subscription != meSubscriptionNull) {
         return;
     }
-    subscription = saSubscriptionAlloc();
-    saUserAppendSubscription(saCurrentUser, subscription);
-    saThreadAppendSubscription(thread, subscription);
+    subscription = meSubscriptionAlloc();
+    meUserAppendSubscription(meCurrentUser, subscription);
+    meThreadAppendSubscription(thread, subscription);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1510,10 +1510,10 @@ static void processFollowThreadCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
+    meThread thread;
     int64 threadID;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1524,8 +1524,8 @@ static void processFollowThreadCommand(
     if(!readInt(argv[1], &threadID, true)) {
         return;
     }
-    thread = saRootFindThread(saTheRoot, threadID);
-    if(thread == saThreadNull) {
+    thread = meRootFindThread(meTheRoot, threadID);
+    if(thread == meThreadNull) {
         coPrintf("Invalid thread ID.\n");
         return;
     }
@@ -1540,11 +1540,11 @@ static void processLeaveThreadCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
-    saSubscription subscription;
+    meThread thread;
+    meSubscription subscription;
     int64 threadID;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1555,16 +1555,16 @@ static void processLeaveThreadCommand(
     if(!readInt(argv[1], &threadID, true)) {
         return;
     }
-    thread = saRootFindThread(saTheRoot, threadID);
-    if(thread == saThreadNull) {
+    thread = meRootFindThread(meTheRoot, threadID);
+    if(thread == meThreadNull) {
         coPrintf("Invalid thread ID.\n");
         return;
     }
-    subscription =  findSubscription(saCurrentUser, thread);
-    if(subscription == saSubscriptionNull) {
+    subscription =  findSubscription(meCurrentUser, thread);
+    if(subscription == meSubscriptionNull) {
         return;
     }
-    saSubscriptionDestroy(subscription);
+    meSubscriptionDestroy(subscription);
     logCommand(argc, argv);
 }
 
@@ -1575,9 +1575,9 @@ static void processAnnounceCommand(
     uint32 argc,
     char **argv)
 {
-    saAnnouncement announcement;
+    meAnnouncement announcement;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1585,18 +1585,18 @@ static void processAnnounceCommand(
         printHelp(argv[0]);
         return;
     }
-    if(!saUserRegionManager(saCurrentUser) && !saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserRegionManager(meCurrentUser) && !meUserSupremeLeader(meCurrentUser)) {
         coPrintf("You must be a region manager to post announcements.\n");
         return;
     }
-    announcement = saAnnouncementAlloc();
-    saAnnouncementSetID(announcement, saRootGetNextAnnouncementID(saTheRoot));
-    saRootSetNextAnnouncementID(saTheRoot, saRootGetNextAnnouncementID(saTheRoot) + 1);
-    saAnnouncementSetSubject(announcement, argv[1], strlen(argv[1]) + 1);
-    saAnnouncementSetMessage(announcement, argv[2], strlen(argv[2]) + 1);
-    saUserAppendAnnouncement(saCurrentUser, announcement);
-    saRootAppendAnnouncement(saTheRoot, announcement);
-    if(!saProcessingLogFile) {
+    announcement = meAnnouncementAlloc();
+    meAnnouncementSetID(announcement, meRootGetNextAnnouncementID(meTheRoot));
+    meRootSetNextAnnouncementID(meTheRoot, meRootGetNextAnnouncementID(meTheRoot) + 1);
+    meAnnouncementSetSubject(announcement, argv[1], strlen(argv[1]) + 1);
+    meAnnouncementSetMessage(announcement, argv[2], strlen(argv[2]) + 1);
+    meUserAppendAnnouncement(meCurrentUser, announcement);
+    meRootAppendAnnouncement(meTheRoot, announcement);
+    if(!meProcessingLogFile) {
         sendAnnouncement(announcement);
         coPrintf("Announcement sent\n");
         logCommand(argc, argv);
@@ -1612,21 +1612,21 @@ static void processListAnnouncementsCommand(
     uint32 argc,
     char **argv)
 {
-    saAnnouncement announcement;
-    saUser user;
+    meAnnouncement announcement;
+    meUser user;
     bool printedAnnouncement = false;
 
     if(argc != 1) {
         printHelp(argv[0]);
         return;
     }
-    saForeachRootAnnouncement(saTheRoot, announcement) {
-        user = saAnnouncementGetUser(announcement);
-        if(saUserSupremeLeader(user) || saUserGetRegion(user) == saCurrentRegion) {
-            coPrintf("%u %s\n", saAnnouncementGetID(announcement), cgiEncode(saAnnouncementGetSubject(announcement)));
+    meForeachRootAnnouncement(meTheRoot, announcement) {
+        user = meAnnouncementGetUser(announcement);
+        if(meUserSupremeLeader(user) || meUserGetRegion(user) == meCurrentRegion) {
+            coPrintf("%u %s\n", meAnnouncementGetID(announcement), cgiEncode(meAnnouncementGetSubject(announcement)));
             printedAnnouncement = true;
         }
-    } saEndRootAnnouncement;
+    } meEndRootAnnouncement;
     if(!printedAnnouncement) {
         coPrintf("No announcements.\n");
     }
@@ -1639,7 +1639,7 @@ static void processShowAnnouncementCommand(
     uint32 argc,
     char **argv)
 {
-    saAnnouncement announcement;
+    meAnnouncement announcement;
     uint64 announcementID;
 
     if(argc != 2) {
@@ -1649,12 +1649,12 @@ static void processShowAnnouncementCommand(
     if(!readInt(argv[1], &announcementID, true)) {
         return;
     }
-    announcement = saRootFindAnnouncement(saTheRoot, announcementID);
-    if(announcement == saAnnouncementNull) {
+    announcement = meRootFindAnnouncement(meTheRoot, announcementID);
+    if(announcement == meAnnouncementNull) {
         coPrintf("Invalid announcement ID.\n");
         return;
     }
-    coPrintf("%s\n", saAnnouncementGetMessage(announcement));
+    coPrintf("%s\n", meAnnouncementGetMessage(announcement));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1664,11 +1664,11 @@ static void processNewPostCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
-    saPost post;
+    meThread thread;
+    mePost post;
     uint32 threadID;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1676,16 +1676,16 @@ static void processNewPostCommand(
         printHelp(argv[0]);
         return;
     }
-    thread = saThreadAlloc();
-    threadID = saRootGetNextThreadID(saTheRoot);
-    saThreadSetID(thread, threadID);
-    saRootSetNextThreadID(saTheRoot, threadID + 1);
-    saThreadSetSubject(thread, argv[1], strlen(argv[1]) + 1);
-    saRootAppendThread(saTheRoot, thread);
-    post = saPostCreate(saCurrentUser, thread, argv[2]);
+    thread = meThreadAlloc();
+    threadID = meRootGetNextThreadID(meTheRoot);
+    meThreadSetID(thread, threadID);
+    meRootSetNextThreadID(meTheRoot, threadID + 1);
+    meThreadSetSubject(thread, argv[1], strlen(argv[1]) + 1);
+    meRootAppendThread(meTheRoot, thread);
+    post = mePostCreate(meCurrentUser, thread, argv[2]);
     followThread(thread);
     logCommand(argc, argv);
-    coPrintf("Created thread %u\n", saThreadGetID(thread));
+    coPrintf("Created thread %u\n", meThreadGetID(thread));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1695,24 +1695,24 @@ static void processListThreadsCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
+    meThread thread;
 
     if(argc != 1) {
         printHelp(argv[0]);
         return;
     }
-    if(saRootGetFirstThread(saTheRoot) == saThreadNull) {
+    if(meRootGetFirstThread(meTheRoot) == meThreadNull) {
         coPrintf("No threads.\n");
         return;
     }
-    saForeachRootThread(saTheRoot, thread) {
-        if(saCurrentUser != saUserNull &&
-                findSubscription(saCurrentUser, thread) != saSubscriptionNull) {
+    meForeachRootThread(meTheRoot, thread) {
+        if(meCurrentUser != meUserNull &&
+                findSubscription(meCurrentUser, thread) != meSubscriptionNull) {
             coPrintf("+");
         }
-        coPrintf("%u %s (%u)\n", saThreadGetID(thread), saThreadGetSubject(thread),
-            saThreadGetNumPosts(thread));
-    } saEndRootThread;
+        coPrintf("%u %s (%u)\n", meThreadGetID(thread), meThreadGetSubject(thread),
+            meThreadGetNumPosts(thread));
+    } meEndRootThread;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1722,8 +1722,8 @@ processListPostsCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
-    saPost post;
+    meThread thread;
+    mePost post;
     uint64 threadID;
 
     if(argc != 2) {
@@ -1733,14 +1733,14 @@ processListPostsCommand(
     if(!readInt(argv[1], &threadID, true)) {
         return;
     }
-    thread = saRootFindThread(saTheRoot, threadID);
-    if(thread == saThreadNull) {
+    thread = meRootFindThread(meTheRoot, threadID);
+    if(thread == meThreadNull) {
         coPrintf("Invalid thread ID.\n");
         return;
     }
-    saForeachThreadPost(thread, post) {
-        coPrintf("%u %s\n", saPostGetID(post), saUserGetShownName(saPostGetUser(post)));
-    } saEndThreadPost;
+    meForeachThreadPost(thread, post) {
+        coPrintf("%u %s\n", mePostGetID(post), meUserGetShownName(mePostGetUser(post)));
+    } meEndThreadPost;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1750,7 +1750,7 @@ static void processShowPostCommand(
     uint32 argc,
     char **argv)
 {
-    saPost post;
+    mePost post;
     uint64 postID;
 
     if(argc != 2) {
@@ -1760,33 +1760,33 @@ static void processShowPostCommand(
     if(!readInt(argv[1], &postID, true)) {
         return;
     }
-    post = saRootFindPost(saTheRoot, postID);
-    if(post == saPostNull) {
+    post = meRootFindPost(meTheRoot, postID);
+    if(post == mePostNull) {
         coPrintf("Invalid post ID.\n");
         return;
     }
-    coPrintf("%s\n", saPostGetMessage(post));
+    coPrintf("%s\n", mePostGetMessage(post));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Send this post 
 --------------------------------------------------------------------------------------------------*/
 static void sendFollowersPost(
-    saPost post)
+    mePost post)
 {
-    saThread thread = saPostGetThread(post);
-    saSubscription subscription;
-    saUser user;
+    meThread thread = mePostGetThread(post);
+    meSubscription subscription;
+    meUser user;
 
-    if(saProcessingLogFile) {
+    if(meProcessingLogFile) {
         return;
     }
-    saForeachThreadSubscription(thread, subscription) {
-        user = saSubscriptionGetUser(subscription);
-        if(saPostGetUser(post) != user) {
-            mailPost(saSubscriptionGetUser(subscription), post);
+    meForeachThreadSubscription(thread, subscription) {
+        user = meSubscriptionGetUser(subscription);
+        if(mePostGetUser(post) != user) {
+            mailPost(meSubscriptionGetUser(subscription), post);
         }
-    } saEndThreadSubscription;
+    } meEndThreadSubscription;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1796,11 +1796,11 @@ static void processReplyCommand(
     uint32 argc,
     char **argv)
 {
-    saThread thread;
-    saPost post;
+    meThread thread;
+    mePost post;
     uint64 threadID;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1811,43 +1811,43 @@ static void processReplyCommand(
     if(!readInt(argv[1], &threadID, true)) {
         return;
     }
-    thread = saRootFindThread(saTheRoot, threadID);
-    post = saPostCreate(saCurrentUser, thread, argv[2]);
+    thread = meRootFindThread(meTheRoot, threadID);
+    post = mePostCreate(meCurrentUser, thread, argv[2]);
     sendFollowersPost(post);
     followThread(thread);
-    mailPost(saCurrentUser, post);
+    mailPost(meCurrentUser, post);
     logCommand(argc, argv);
-    coPrintf("Created post %u\n", saPostGetID(post));
+    coPrintf("Created post %u\n", mePostGetID(post));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Create a new listing.
 --------------------------------------------------------------------------------------------------*/
-static saListing saListingCreate(
-    saUser user,
-    saCategory category,
+static meListing meListingCreate(
+    meUser user,
+    meCategory category,
     uint32 rate,
     bool offered,
     bool fixedPrice,
     char *title,
     char *description)
 {
-    saRegion region = saUserGetRegion(user);
-    saListing listing = saListingAlloc();
-    uint64 listingID = saRootGetNextListingID(saTheRoot);
+    meRegion region = meUserGetRegion(user);
+    meListing listing = meListingAlloc();
+    uint64 listingID = meRootGetNextListingID(meTheRoot);
 
-    saListingSetID(listing, listingID);
-    saRootSetNextListingID(saTheRoot, listingID + 1);
-    saListingSetRate(listing, rate);
-    saListingSetOffered(listing, offered);
-    saListingSetFixedPrice(listing, fixedPrice);
-    saListingSetTitle(listing, title, strlen(title) + 1);
-    saListingSetDescription(listing, description, strlen(description) + 1);
-    saCategoryAppendListing(category, listing);
-    saRootInsertListing(saTheRoot, listing);
-    saUserAppendListing(user, listing);
-    saCategorySetNumListings(category, saCategoryGetNumListings(category) + 1);
-    saRegionSetNumListings(region, saRegionGetNumListings(region) + 1);
+    meListingSetID(listing, listingID);
+    meRootSetNextListingID(meTheRoot, listingID + 1);
+    meListingSetRate(listing, rate);
+    meListingSetOffered(listing, offered);
+    meListingSetFixedPrice(listing, fixedPrice);
+    meListingSetTitle(listing, title, strlen(title) + 1);
+    meListingSetDescription(listing, description, strlen(description) + 1);
+    meCategoryAppendListing(category, listing);
+    meRootInsertListing(meTheRoot, listing);
+    meUserAppendListing(user, listing);
+    meCategorySetNumListings(category, meCategoryGetNumListings(category) + 1);
+    meRegionSetNumListings(region, meRegionGetNumListings(region) + 1);
     return listing;
 }
 
@@ -1855,21 +1855,21 @@ static saListing saListingCreate(
   Update a listing
 --------------------------------------------------------------------------------------------------*/
 static void updateListing(
-    saListing listing,
-    saCategory category,
+    meListing listing,
+    meCategory category,
     uint32 rate,
     bool offered,
     bool fixedPrice,
     char *title,
     char *description)
 {
-    saRegion region = saUserGetRegion(saListingGetUser(listing));
+    meRegion region = meUserGetRegion(meListingGetUser(listing));
 
-    saListingSetRate(listing, rate);
-    saListingSetOffered(listing, offered);
-    saListingSetFixedPrice(listing, fixedPrice);
-    saListingSetTitle(listing, title, strlen(title) + 1);
-    saListingSetDescription(listing, description, strlen(description) + 1);
+    meListingSetRate(listing, rate);
+    meListingSetOffered(listing, offered);
+    meListingSetFixedPrice(listing, fixedPrice);
+    meListingSetTitle(listing, title, strlen(title) + 1);
+    meListingSetDescription(listing, description, strlen(description) + 1);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1879,14 +1879,14 @@ static void processNewListingCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
-    saListing listing;
+    meCategory category;
+    meListing listing;
     utSym categorySym;
     int64 rate;
     bool fixedPrice = false;
     bool offerService;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1896,8 +1896,8 @@ static void processNewListingCommand(
     }
     offerService = strcmp(argv[1], "wanted");
     categorySym = utSymCreate(argv[2]);
-    category = saRootFindCategory(saTheRoot, categorySym);
-    if(category == saCategoryNull) {
+    category = meRootFindCategory(meTheRoot, categorySym);
+    if(category == meCategoryNull) {
         coPrintf("Category %s does not exist.\n", argv[2]);
         return;
     }
@@ -1913,10 +1913,10 @@ static void processNewListingCommand(
             return;
         }
     }
-    listing = saListingCreate(saCurrentUser, category, rate, offerService, fixedPrice, argv[4],
+    listing = meListingCreate(meCurrentUser, category, rate, offerService, fixedPrice, argv[4],
         argv[5]);
     logCommand(argc, argv);
-    coPrintf("New listing created with listingID %llu\n", saListingGetID(listing));
+    coPrintf("New listing created with listingID %llu\n", meListingGetID(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1926,14 +1926,14 @@ static void processEditListingCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
-    saListing listing;
+    meCategory category;
+    meListing listing;
     utSym categorySym;
     int64 rate, listingID;
     bool fixedPrice = false;
     bool offerService;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -1944,20 +1944,20 @@ static void processEditListingCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = saRootFindListing(saTheRoot, (uint32)listingID);
-    if(listing == saListingNull) {
+    listing = meRootFindListing(meTheRoot, (uint32)listingID);
+    if(listing == meListingNull) {
         coPrintf("No listing %llu.\n", listingID);
         return;
     }
-    if(saListingGetUser(listing) != saCurrentUser && !saUserSupremeLeader(saCurrentUser) &&
-            !(saUserRegionManager(saCurrentUser) && saUserGetRegion(saListingGetUser(listing)) == saUserGetRegion(saCurrentUser))) {
+    if(meListingGetUser(listing) != meCurrentUser && !meUserSupremeLeader(meCurrentUser) &&
+            !(meUserRegionManager(meCurrentUser) && meUserGetRegion(meListingGetUser(listing)) == meUserGetRegion(meCurrentUser))) {
         coPrintf("You do not own this listing.\n");
         return;
     }
     offerService = strcmp(argv[2], "wanted");
     categorySym = utSymCreate(argv[3]);
-    category = saRootFindCategory(saTheRoot, categorySym);
-    if(category == saCategoryNull) {
+    category = meRootFindCategory(meTheRoot, categorySym);
+    if(category == meCategoryNull) {
         coPrintf("Category %s does not exist.\n", argv[3]);
         return;
     }
@@ -1975,7 +1975,7 @@ static void processEditListingCommand(
     }
     updateListing(listing, category, rate, offerService, fixedPrice, argv[5], argv[6]);
     logCommand(argc, argv);
-    coPrintf("Listing updated\n", saListingGetID(listing));
+    coPrintf("Listing updated\n", meListingGetID(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1985,13 +1985,13 @@ static void processDeleteListingCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
-    saRegion region;
-    saListing listing;
+    meCategory category;
+    meRegion region;
+    meListing listing;
     utSym categorySym;
     int64 listingID;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
@@ -2002,22 +2002,22 @@ static void processDeleteListingCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = saRootFindListing(saTheRoot, listingID);
-    if(listing == saListingNull) {
+    listing = meRootFindListing(meTheRoot, listingID);
+    if(listing == meListingNull) {
         coPrintf("Invalid listingID\n");
         return;
     }
-    if(saListingGetUser(listing) != saCurrentUser) {
+    if(meListingGetUser(listing) != meCurrentUser) {
         coPrintf("You don't own this listing.\n");
         return;
     }
-    category = saListingGetCategory(listing);
-    region = saUserGetRegion(saListingGetUser(listing));
-    saListingDestroy(listing);
-    saCategorySetNumListings(category, saCategoryGetNumListings(category) - 1);
-    saRegionSetNumListings(region, saRegionGetNumListings(region) - 1);
-    if(saCategoryGetFirstListing(category) == saListingNull) {
-        saCategoryDestroy(category);
+    category = meListingGetCategory(listing);
+    region = meUserGetRegion(meListingGetUser(listing));
+    meListingDestroy(listing);
+    meCategorySetNumListings(category, meCategoryGetNumListings(category) - 1);
+    meRegionSetNumListings(region, meRegionGetNumListings(region) - 1);
+    if(meCategoryGetFirstListing(category) == meListingNull) {
+        meCategoryDestroy(category);
     }
     logCommand(argc, argv);
     coPrintf("Listing %llu deleted.\n", listingID);
@@ -2030,14 +2030,14 @@ static void processCreateCategoryCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
+    meCategory category;
     utSym categorySym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserRegionManager(saCurrentUser)) {
+    if(!meUserRegionManager(meCurrentUser)) {
         coPrintf("Only region managers can create categories.\n");
         return;
     }
@@ -2046,14 +2046,14 @@ static void processCreateCategoryCommand(
         return;
     }
     categorySym = utSymCreate(argv[1]);
-    category = saRootFindCategory(saTheRoot, categorySym);
-    if(category != saCategoryNull) {
+    category = meRootFindCategory(meTheRoot, categorySym);
+    if(category != meCategoryNull) {
         coPrintf("Category %s already exists.\n", argv[1]);
         return;
     }
-    category = saCategoryAlloc();
-    saCategorySetSym(category, categorySym);
-    saRootInsertCategory(saTheRoot, category);
+    category = meCategoryAlloc();
+    meCategorySetSym(category, categorySym);
+    meRootInsertCategory(meTheRoot, category);
     logCommand(argc, argv);
     coPrintf("Category %s created.\n", argv[1]);
 }
@@ -2065,14 +2065,14 @@ static void processDeleteCategoryCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
+    meCategory category;
     utSym categorySym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserRegionManager(saCurrentUser)) {
+    if(!meUserRegionManager(meCurrentUser)) {
         coPrintf("Only region managers can delete categories.\n");
         return;
     }
@@ -2081,12 +2081,12 @@ static void processDeleteCategoryCommand(
         return;
     }
     categorySym = utSymCreate(argv[1]);
-    category = saRootFindCategory(saTheRoot, categorySym);
-    if(category == saCategoryNull) {
+    category = meRootFindCategory(meTheRoot, categorySym);
+    if(category == meCategoryNull) {
         coPrintf("Category %s does not exist.\n", argv[1]);
         return;
     }
-    saCategoryDestroy(category);
+    meCategoryDestroy(category);
     logCommand(argc, argv);
     coPrintf("Category %s deleted.\n", argv[1]);
 }
@@ -2098,14 +2098,14 @@ static void processRenameCategoryCommand(
     uint32 argc,
     char **argv)
 {
-    saCategory category;
+    meCategory category;
     utSym categorySym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserRegionManager(saCurrentUser)) {
+    if(!meUserRegionManager(meCurrentUser)) {
         coPrintf("Only region managers can rename categories.\n");
         return;
     }
@@ -2114,12 +2114,12 @@ static void processRenameCategoryCommand(
         return;
     }
     categorySym = utSymCreate(argv[1]);
-    category = saRootFindCategory(saTheRoot, categorySym);
-    if(category == saCategoryNull) {
+    category = meRootFindCategory(meTheRoot, categorySym);
+    if(category == meCategoryNull) {
         coPrintf("Category %s does not exist.\n", argv[1]);
         return;
     }
-    saRootRenameCategory(saTheRoot, category, utSymCreate(argv[2]));
+    meRootRenameCategory(meTheRoot, category, utSymCreate(argv[2]));
     logCommand(argc, argv);
     coPrintf("Category %s renamed to %s.\n", argv[1], argv[2]);
 }
@@ -2131,14 +2131,14 @@ static void processCreateRegionCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
     utSym regionSym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserSupremeLeader(meCurrentUser)) {
         coPrintf("Only the supreme leader can create regions.\n");
         return;
     }
@@ -2147,14 +2147,14 @@ static void processCreateRegionCommand(
         return;
     }
     regionSym = utSymCreate(argv[1]);
-    region = saRootFindRegion(saTheRoot, regionSym);
-    if(region != saRegionNull) {
+    region = meRootFindRegion(meTheRoot, regionSym);
+    if(region != meRegionNull) {
         coPrintf("Region %s already exists.\n", argv[1]);
         return;
     }
-    region = saRegionAlloc();
-    saRegionSetSym(region, regionSym);
-    saRootInsertRegion(saTheRoot, region);
+    region = meRegionAlloc();
+    meRegionSetSym(region, regionSym);
+    meRootInsertRegion(meTheRoot, region);
     logCommand(argc, argv);
     coPrintf("Region %s created.\n", argv[1]);
 }
@@ -2166,14 +2166,14 @@ static void processDeleteRegionCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
     utSym regionSym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserSupremeLeader(meCurrentUser)) {
         coPrintf("Only the supreme leader can delete regions.\n");
         return;
     }
@@ -2182,12 +2182,12 @@ static void processDeleteRegionCommand(
         return;
     }
     regionSym = utSymCreate(argv[1]);
-    region = saRootFindRegion(saTheRoot, regionSym);
-    if(region == saRegionNull) {
+    region = meRootFindRegion(meTheRoot, regionSym);
+    if(region == meRegionNull) {
         coPrintf("Region %s does not exist.\n", argv[1]);
         return;
     }
-    saRegionDestroy(region);
+    meRegionDestroy(region);
     logCommand(argc, argv);
     coPrintf("Region %s deleted.\n", argv[1]);
 }
@@ -2199,14 +2199,14 @@ static void processRenameRegionCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
+    meRegion region;
     utSym regionSym;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserSupremeLeader(meCurrentUser)) {
         coPrintf("Only the supreme leader can rename regions.\n");
         return;
     }
@@ -2215,12 +2215,12 @@ static void processRenameRegionCommand(
         return;
     }
     regionSym = utSymCreate(argv[1]);
-    region = saRootFindRegion(saTheRoot, regionSym);
-    if(region == saRegionNull) {
+    region = meRootFindRegion(meTheRoot, regionSym);
+    if(region == meRegionNull) {
         coPrintf("Region %s does not exist.\n", argv[1]);
         return;
     }
-    saRootRenameRegion(saTheRoot, region, utSymCreate(argv[2]));
+    meRootRenameRegion(meTheRoot, region, utSymCreate(argv[2]));
     logCommand(argc, argv);
     coPrintf("Region %s renamed to %s.\n", argv[1], argv[2]);
 }
@@ -2232,14 +2232,14 @@ static void processSetRegionManagerCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
-    saUser user;
+    meRegion region;
+    meUser user;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserSupremeLeader(meCurrentUser)) {
         coPrintf("Only the supreme leader can select region managers.\n");
         return;
     }
@@ -2247,16 +2247,16 @@ static void processSetRegionManagerCommand(
         printHelp(argv[0]);
         return;
     }
-    user = saRootFindUser(saTheRoot, utSymCreate(argv[1]));
-    if(user == saUserNull) {
+    user = meRootFindUser(meTheRoot, utSymCreate(argv[1]));
+    if(user == meUserNull) {
         coPrintf("User %s does not exist.\n", argv[1]);
         return;
     }
     if(!strcmp(argv[2], "true")) {
-        saUserSetRegionManager(user, true);
+        meUserSetRegionManager(user, true);
         coPrintf("User %s set as region manager.\n", argv[1]);
     } else if(!strcmp(argv[2], "false")) {
-        saUserSetRegionManager(user, false);
+        meUserSetRegionManager(user, false);
         coPrintf("User %s removed as region manager.\n", argv[1]);
     } else {
         printHelp(argv[0]);
@@ -2272,15 +2272,15 @@ static void processSaveDatabaseCommand(
     uint32 argc,
     char **argv)
 {
-    saRegion region;
-    saUser user;
+    meRegion region;
+    meUser user;
     FILE *file;
 
-    if(saCurrentUser == saUserNull) {
+    if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
         return;
     }
-    if(!saUserSupremeLeader(saCurrentUser)) {
+    if(!meUserSupremeLeader(meCurrentUser)) {
         coPrintf("Only the supreme leader can select region managers.\n");
         return;
     }
@@ -2290,14 +2290,14 @@ static void processSaveDatabaseCommand(
     }
     file = fopen(DATABASE_FILE, "w");
     if(file == NULL) {
-        coPrintf("Unable to open sharealot.db\n");
+        coPrintf("Unable to open " DATABASE_FILE "\n");
         return;
     }
     utSaveTextDatabase(file);
     fclose(file);
-    fclose(saLogFile);
+    fclose(meLogFile);
     rename(LOG_FILE, OLD_LOG_FILE);
-    saLogFile = fopen(LOG_FILE, "w");
+    meLogFile = fopen(LOG_FILE, "w");
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -2411,30 +2411,30 @@ static bool switchSession(
     char *sessionID)
 {
     utSym sym = utSymCreate(sessionID);
-    saSession session = saRootFindSession(saTheRoot, sym);
+    meSession session = meRootFindSession(meTheRoot, sym);
 
-    if(session == saCurrentSession && session != saSessionNull) {
+    if(session == meCurrentSession && session != meSessionNull) {
         return false;
     }
-    if(saCurrentSession != saSessionNull) {
-        saSessionSetUser(saCurrentSession, saCurrentUser);
-        if(saCurrentUser != saUserNull) {
-            saUserSetSession(saCurrentUser, saCurrentSession);
+    if(meCurrentSession != meSessionNull) {
+        meSessionSetUser(meCurrentSession, meCurrentUser);
+        if(meCurrentUser != meUserNull) {
+            meUserSetSession(meCurrentUser, meCurrentSession);
         }
     }
-    if(session == saSessionNull) {
-        session = saSessionAlloc();
-        saSessionSetSym(session, sym);
-        saSessionSetRegion(session, saRootGetFirstRegion(saTheRoot));
-        saRootInsertSession(saTheRoot, session);
-        saCurrentUser = saUserNull;
-        saCurrentRegion = saSessionGetRegion(session);
-        saCurrentSession = session;
+    if(session == meSessionNull) {
+        session = meSessionAlloc();
+        meSessionSetSym(session, sym);
+        meSessionSetRegion(session, meRootGetFirstRegion(meTheRoot));
+        meRootInsertSession(meTheRoot, session);
+        meCurrentUser = meUserNull;
+        meCurrentRegion = meSessionGetRegion(session);
+        meCurrentSession = session;
         return true;
     }
-    saCurrentSession = session;
-    saCurrentUser = saSessionGetUser(session);
-    saCurrentRegion = saSessionGetRegion(session);
+    meCurrentSession = session;
+    meCurrentUser = meSessionGetUser(session);
+    meCurrentRegion = meSessionGetRegion(session);
     return false;
 }
 
@@ -2453,8 +2453,8 @@ static void commandInterpreter(void)
             coPrintf("For help, enter the 'help' command\n");
         } else {
             readLine(stdin);
-            argc = parseArguments(saLineBuffer, argv);
-            saCurrentTime = time(NULL);
+            argc = parseArguments(meLineBuffer, argv);
+            meCurrentTime = time(NULL);
             if(!processCommand(argc, argv)) {
                 coCompleteResponse();
                 return;
@@ -2472,16 +2472,16 @@ static void switchUser(
     char *userName)
 {
     utSym sym = utSymCreate(userName);
-    saUser user = saRootFindUser(saTheRoot, sym);
+    meUser user = meRootFindUser(meTheRoot, sym);
 
-    if(user == saUserNull) {
+    if(user == meUserNull) {
         coPrintf("Unable to find user %s\n", userName);
     } else {
-        if(saCurrentUser != saUserNull) {
-            saUserSetLoggedIn(saCurrentUser, false);
+        if(meCurrentUser != meUserNull) {
+            meUserSetLoggedIn(meCurrentUser, false);
         }
-        saUserSetLoggedIn(user, true);
-        saCurrentUser = user;
+        meUserSetLoggedIn(user, true);
+        meCurrentUser = user;
     }
 }
 
@@ -2502,14 +2502,14 @@ static void processFileCommands(
         exit(1);
     }
     while(readLine(file)) {
-        argc = parseArguments(saLineBuffer, argv);
+        argc = parseArguments(meLineBuffer, argv);
         if(argc > 1) {
             p = strptime(argv[0], "%x-%X", &tm);
             if(p == NULL || *p != '\0') {
                 coPrintf("Invalid date format.  Use MM/DD/YY.\n");
                 exit(1);
             }
-            saCurrentTime = mktime(&tm);
+            meCurrentTime = mktime(&tm);
             if(argv[1][0] == ':') {
                 switchUser(argv[1] + 1);
                 processCommand(argc - 2, argv + 2);
@@ -2519,7 +2519,7 @@ static void processFileCommands(
         }
     }
     fclose(file);
-    saCurrentUser = saUserNull;
+    meCurrentUser = meUserNull;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -2536,26 +2536,26 @@ int main(
         exit(1);
     }
     utStart();
-    saDatabaseStart();
-    saTheRoot = saRootAlloc();
-    saCurrentUser = saUserNull;
-    saCurrentRegion = saRegionNull;
-    saCurrentSession = saSessionNull;
-    saLineSize = 42;
-    saLineBuffer = utNewA(char, saLineSize);
+    meDatabaseStart();
+    meTheRoot = meRootAlloc();
+    meCurrentUser = meUserNull;
+    meCurrentRegion = meRegionNull;
+    meCurrentSession = meSessionNull;
+    meLineSize = 42;
+    meLineBuffer = utNewA(char, meLineSize);
     if(utFileExists(DATABASE_FILE)) {
         databaseFile = fopen(DATABASE_FILE, "r");
         utLoadTextDatabase(databaseFile);
         fclose(databaseFile);
     }
     if(utFileExists(LOG_FILE)) {
-        saProcessingLogFile = true;
-        saLogFile = NULL;
+        meProcessingLogFile = true;
+        meLogFile = NULL;
         processFileCommands(LOG_FILE);
-        saCurrentRegion = saRootGetFirstRegion(saTheRoot);
+        meCurrentRegion = meRootGetFirstRegion(meTheRoot);
     }
-    saProcessingLogFile = false;
-    saLogFile = fopen(LOG_FILE, "a");
+    meProcessingLogFile = false;
+    meLogFile = fopen(LOG_FILE, "a");
     if(argc == 2) {
         coStartServer(argv[1]);
     }
@@ -2563,9 +2563,9 @@ int main(
     if(argc == 2) {
         coStopServer();
     }
-    saDatabaseStop();
-    fclose(saLogFile);
-    utFree(saLineBuffer);
+    meDatabaseStop();
+    fclose(meLogFile);
+    utFree(meLineBuffer);
     utStop(false);
     return 0;
 }

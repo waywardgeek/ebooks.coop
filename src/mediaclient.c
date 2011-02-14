@@ -19,7 +19,7 @@ int main(
         printf("Usage: %s\n", argv[0]);
         return 1;
     }
-    response = coStartClient("/tmp/sharealot", sessionID);
+    response = coStartClient("/tmp/media", sessionID);
     printf("%s", response);
     while(fgets(line, CO_MAX_MESSAGE_LENGTH, stdin) && strcmp(line, "quit")) {
         coSendMessage("%s", line);
