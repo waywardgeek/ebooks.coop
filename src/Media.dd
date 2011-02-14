@@ -6,9 +6,6 @@ class Root
     uint64 nextPostID
     uint64 nextAnnouncementID
 
-class Region
-    uint32 numListings
-
 class Session
 
 class User
@@ -24,7 +21,6 @@ class User
     bool validated
     array uint8 validationKey
     bool supremeLeader // There can be only one
-    bool regionManager // There can be multiple per region
 
 class Transaction array
     uint64 date
@@ -64,7 +60,6 @@ class Announcement
     array char message
     uint32 ID
 
-relationship Root Region hashed
 relationship Root User hashed
 relationship Root:ByEmail User:ByEmail hashed email
 relationship Root Charity doubly_linked
@@ -77,10 +72,8 @@ relationship Root Category hashed
 relationship User Listing doubly_linked mandatory
 relationship Category Listing doubly_linked mandatory
 relationship Root Listing hashed ID
-relationship Region User doubly_linked mandatory
 relationship Root Session hashed
 relationship Session User
-relationship Session Region
 relationship Root Thread hashed ID
 relationship Root Post hashed ID
 relationship Thread Post doubly_linked mandatory

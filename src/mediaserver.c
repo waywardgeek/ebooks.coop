@@ -449,58 +449,9 @@ static char *hashPassword(
 static char *findBalance(
     uint32 balance)
 {
-    uint32 unicorns = balance/1000;
-    uint32 butterflyBalance = balance - 1000*unicorns;
-    uint32 butterflies = butterflyBalance/100;
-    uint32 moonBalance = butterflyBalance - 100*butterflies;
-    uint32 moons = moonBalance/10;
-    uint32 stars = moonBalance - 10*moons;
-    static char buf[sizeof("xxxxxxxxxx unicorns, x butterflies, x stars")];
-    char *p = buf;
+    static char buf[20];
 
-    if(unicorns > 0) {
-        if(unicorns == 1) {
-            p += sprintf(p, "%u unicorn", unicorns);
-        } else {
-            p += sprintf(p, "%u unicorns", unicorns);
-        }
-    }
-    if(butterflies > 0) {
-        if(p != buf) {
-            *p++ = ',';
-            *p++ = ' ';
-        }
-        if(butterflies == 1) {
-            p += sprintf(p, "%u butterfly", butterflies);
-        } else {
-            p += sprintf(p, "%u butterflies", butterflies);
-        }
-    }
-    if(moons > 0) {
-        if(p != buf) {
-            *p++ = ',';
-            *p++ = ' ';
-        }
-        if(moons == 1) {
-            p += sprintf(p, "%u moon", moons);
-        } else {
-            p += sprintf(p, "%u moons", moons);
-        }
-    }
-    if(stars > 0) {
-        if(p != buf) {
-            *p++ = ',';
-            *p++ = ' ';
-        }
-        if(stars == 1) {
-            p += sprintf(p, "%u star", stars);
-        } else {
-            p += sprintf(p, "%u stars", stars);
-        }
-    }
-    if(p == buf) {
-        strcpy(buf, "no stars");
-    }
+    sprintf(buf, "$%d.%02d", balance/100, balance % 100);
     return buf;
 }
 
