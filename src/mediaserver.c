@@ -872,7 +872,7 @@ static meUser createNewUser(
                 "Your password is: %s\n",
                 meUserGetShownName(user), cgiEncode(meUserGetName(user)), validationKey,
                 meUserGetShownName(user), password));
-        logCommand(6, argv);
+        logCommand(7, argv);
     } else {
         nounce = argv[4];
         meUserSetNounce(user, nounce, NOUNCE_LENGTH + 1);
