@@ -1,7 +1,23 @@
 module Media me
 
+schema Main
+
+enum MediaType
+    ME_EBOOK
+    ME_MAGAZINE
+    ME_SONG
+    ME_ALBUM
+    ME_NEWS_PAPER
+    ME_SOFTWARE
+    ME_MOVIE
+
+enum TransactionType
+    ME_TRANSFER
+    ME_DEPOSIT
+    ME_WITHDRAWL
+
 class Root
-    uint64 nextListingID
+    uint64 nextMediaID
     uint64 nextThreadID
     uint64 nextPostID
     uint64 nextAnnouncementID
@@ -19,28 +35,112 @@ class User
     uint64 lastActivity
     uint32 balance
     bool validated
+    bool isMember
     array uint8 validationKey
     bool supremeLeader // There can be only one
 
+// Transactions move money from one user to another, or for deposits and
+// withdrawls, to or from a credit card.
 class Transaction array
+    TransactionType type
     uint64 date
     uint32 amount
-    array char description
+
+// The credit card number is hashed with the CCV code in a way that results an
+// integer at most 9999-9999-9999.  This should provide some protection.
+class CreditCard
+    uint16 lowestFourDigits
+    uint64 upperTwelveDigits
+    array char name
+    array char address1
+    array char address2
+    array char city
+    array char state
+    array char zipcode
+    array char country
+    uint8 month
+    uint16 year
 
 class Charity
 
-class Membership
+// Connector class from User to Charity
+class Cause
+
+class Seller
 
 class Category
-    uint32 numListings
+    uint32 numMedias
 
-class Listing
+// Link from a Category to a Media object
+class Label
+
+class Ebook
+    array char Title
+    bool hasAudio
+    bool isSingle  // Short ebook
+
+class Chapter
+    array char text // In markdown format?
+    bool hasAudio
+    array char audioFileName
+
+class Magazine
+
+class Album
+
+class Song
+
+class NewsPaper
+
+class Software
+
+class Media
+    MediaType type
     array char title
-    array char description
+    array char Author
     uint64 ID
-    uint32 rate
-    bool offered
-    bool fixedPrice // Hourly otherwise
+    uint32 price
+    uint8 rating
+    array char shortDescription
+    array char longDescription
+    array char imageFile
+    union type
+        Ebook ebook: ME_EBOOK
+        Magazine magazine: ME_MAGAZINE
+        Song song: ME_SONG
+        Album album: ME_ALBUM
+        NewsPaper newsPaper: ME_NEWS_PAPER
+        Software software: ME_SOFTWARE
+
+class Item
+
+relationship Root User hashed
+relationship Root:ByEmail User:ByEmail hashed email
+relationship Root Charity doubly_linked
+relationship User Charity mandatory
+relationship Charity Cause doubly_linked mandatory
+relationship User Cause hashed Charity mandatory
+relationship User Seller mandatory
+relationship User CreditCard doubly_linked mandatory
+relationship User:From Transaction:Out doubly_linked mandatory
+relationship CreditCard Transaction
+relationship Media Item doubly_linked mandatory
+relationship User Item doubly_linked mandatory
+relationship Item Transaction cascade
+relationship User:To Transaction:In doubly_linked mandatory
+relationship User Media doubly_linked mandatory
+relationship Root Category:Root
+relationship Category Category hashed cascade
+relationship Category Label doubly_linked mandatory
+relationship Media Label doubly_linked mandatory
+relationship Root Media hashed ID
+relationship Root Session hashed
+relationship Session User
+relationship Seller Media doubly_linked mandatory
+relationship Album Song doubly_linked mandatory
+relationship Ebook Chapter doubly_linked mandatory
+
+schema Forum
 
 class Thread
     array char subject
@@ -60,20 +160,6 @@ class Announcement
     array char message
     uint32 ID
 
-relationship Root User hashed
-relationship Root:ByEmail User:ByEmail hashed email
-relationship Root Charity doubly_linked
-relationship User Charity mandatory
-relationship Charity Membership doubly_linked mandatory
-relationship User Membership hashed Charity mandatory
-relationship User:From Transaction:Out doubly_linked mandatory
-relationship User:To Transaction:In doubly_linked mandatory
-relationship Root Category hashed
-relationship User Listing doubly_linked mandatory
-relationship Category Listing doubly_linked mandatory
-relationship Root Listing hashed ID
-relationship Root Session hashed
-relationship Session User
 relationship Root Thread hashed ID
 relationship Root Post hashed ID
 relationship Thread Post doubly_linked mandatory

@@ -194,9 +194,9 @@ static void printHelp(
             "    transactions [fromDate [toDate]] - list transactions\n"
             "    list [cateory]\n"
             "    show listingID\n"
-            "    newListing (offered|wanted) category rate title description\n"
-            "    editListing listingID (offered|wanted) category rate title description\n"
-            "    deleteListing listingID\n"
+            "    newMedia (offered|wanted) category rate title description\n"
+            "    editMedia listingID (offered|wanted) category rate title description\n"
+            "    deleteMedia listingID\n"
             "For manipulating accounts:\n"
             "    newUser userName shownName email password\n"
             "    newCharity userName shownName email password\n"
@@ -317,16 +317,16 @@ static void printHelp(
     } else if(!strcmp(command, "showAnnouncement")) {
         coPrintf("showAnnouncement announcementID\n"
             "Show an announcement.\n");
-    } else if(!strcmp(command, "newListing")) {
-        coPrintf("newListing (offered|wanted) category rate title description\n"
+    } else if(!strcmp(command, "newMedia")) {
+        coPrintf("newMedia (offered|wanted) category rate title description\n"
             "Create a new listing for a service you offer or want in a specific category.\n"
             "The rate is in US dollars per hour unless you start with =, in which case\n"
             "It's fixed price.\n");
-    } else if(!strcmp(command, "editListing")) {
-        coPrintf("editListing listintID (offered|wanted) category rate title description\n"
+    } else if(!strcmp(command, "editMedia")) {
+        coPrintf("editMedia listintID (offered|wanted) category rate title description\n"
             "Edit an existing listing.\n");
-    } else if(!strcmp(command, "deleteListing")) {
-        coPrintf("deleteListing listingID\n"
+    } else if(!strcmp(command, "deleteMedia")) {
+        coPrintf("deleteMedia listingID\n"
             "Delete a service you offered or wanted.  The listingID is reported by\n"
             "the list command.\n");
     } else if(!strcmp(command, "createCategory")) {
@@ -715,7 +715,7 @@ static void processListCommand(
     char **argv)
 {
     meCategory category = meCategoryNull;
-    meListing listing;
+    meMedia listing;
     bool hasItems = false;
 
     if(argc > 2) {
@@ -730,18 +730,18 @@ static void processListCommand(
         }
     }
     if(category != meCategoryNull) {
-        meForeachCategoryListing(category, listing) {
-            coPrintf("%s listingID=%llu\n", meListingGetTitle(listing), meListingGetID(listing));
+        meForeachCategoryMedia(category, listing) {
+            coPrintf("%s listingID=%llu\n", meMediaGetTitle(listing), meMediaGetID(listing));
             hasItems = true;
-        } meEndCategoryListing;
+        } meEndCategoryMedia;
         if(!hasItems) {
             coPrintf("There are no listings in this category.\n");
         }
     } else {
         meForeachRootCategory(meTheRoot, category) {
-            //if(meCategoryGetNumListings(category) > 0) {
+            //if(meCategoryGetNumMedias(category) > 0) {
                 coPrintf("%s (%u)\n", meCategoryGetName(category),
-                    meCategoryGetNumListings(category));
+                    meCategoryGetNumMedias(category));
                 hasItems = true;
             //}
         } meEndRootCategory;
@@ -758,7 +758,7 @@ static void processShowCommand(
     uint32 argc,
     char **argv)
 {
-    meListing listing;
+    meMedia listing;
     uint64 listingID;
 
     if(argc != 2) {
@@ -768,19 +768,18 @@ static void processShowCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = meRootFindListing(meTheRoot, listingID);
-    if(listing == meListingNull) {
+    listing = meRootFindMedia(meTheRoot, listingID);
+    if(listing == meMediaNull) {
         coPrintf("Invalid listingID\n");
         return;
     }
-    coPrintf("%s: %s %s%u", meListingOffered(listing)? "Offered" : "Wanted",
-        cgiEncode(meListingGetTitle(listing)),
-        meListingFixedPrice(listing)? "cost=" : "rate=", meListingGetRate(listing));
+    coPrintf("%s: price %u", cgiEncode(meMediaGetTitle(listing)), meMediaGetPrice(listing));
     coPrintf(" user=%s",
-        cgiEncode(meUserGetShownName(meListingGetUser(listing))));
+        cgiEncode(meUserGetShownName(meMediaGetUser(listing))));
     coPrintf(" category=%s listingID=%llu\n%s\n",
-        cgiEncode(meCategoryGetName(meListingGetCategory(listing))), listingID,
-        meListingGetDescription(listing));
+        cgiEncode(meCategoryGetName(meMediaGetCategory(listing))), listingID,
+        meMediaGetShortDescription(listing));
+    coPrintf("%s\n", meMediaGetLongDescription(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -897,7 +896,7 @@ static void processJoinCharityCommand(
 {
     meUser user;
     meCharity charity;
-    meMembership membership;
+    meCause cause;
 
     if(meCurrentUser == meUserNull) {
         coPrintf("Not currently logged in.\n");
@@ -917,13 +916,13 @@ static void processJoinCharityCommand(
         coPrintf("User '%s' is not a charity.\n", argv[1]);
         return;
     }
-    if(meUserFindMembership(meCurrentUser, charity) != meMembershipNull) {
+    if(meUserFindCause(meCurrentUser, charity) != meCauseNull) {
         coPrintf("Already belong to charity %s\n", argv[1]);
         return;
     }
-    membership = meMembershipAlloc();
-    meCharityAppendMembership(charity, membership);
-    meUserAppendMembership(meCurrentUser, membership);
+    cause = meCauseAlloc();
+    meCharityAppendCause(charity, cause);
+    meUserAppendCause(meCurrentUser, cause);
     logCommand(argc, argv);
     coPrintf("%s joined charity %s successfully.\n", meUserGetShownName(meCurrentUser), argv[1]);
 }
@@ -1107,12 +1106,12 @@ static void processResetPasswordCommand(
 static uint32 countUserCharities(
     meUser user)
 {
-    meMembership membership;
+    meCause cause;
     uint32 numCharities = 0;
 
-    meForeachUserMembership(user, membership) {
+    meForeachUserCause(user, cause) {
         numCharities++;
-    } meEndUserMembership;
+    } meEndUserCause;
     return numCharities;
 }
 
@@ -1143,14 +1142,14 @@ static void distributeToCharity(
     uint32 cents)
 {
     meCharity charity;
-    meMembership membership;
+    meCause cause;
     uint32 numCharities = countUserCharities(user);
     uint32 amount = cents/numCharities;
     uint32 remainder = cents - (amount*numCharities);
     uint32 donation;
 
-    meForeachUserMembership(user, membership) {
-        charity = meMembershipGetCharity(membership);
+    meForeachUserCause(user, cause) {
+        charity = meCauseGetCharity(cause);
         if(remainder > 0) {
             donation = amount + 1;
             remainder--;
@@ -1158,7 +1157,7 @@ static void distributeToCharity(
             donation = amount;
         }
         donate(charity, user, donation);
-    } meEndUserMembership;
+    } meEndUserCause;
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -1632,37 +1631,36 @@ static void processReplyCommand(
 /*--------------------------------------------------------------------------------------------------
   Create a new listing.
 --------------------------------------------------------------------------------------------------*/
-static meListing meListingCreate(
+static meMedia meMediaCreate(
     meUser user,
+    meMediaType type,
     meCategory category,
-    uint32 rate,
-    bool offered,
-    bool fixedPrice,
+    uint32 price,
     char *title,
-    char *description)
+    char *shortDescription,
+    char *longDescription)
 {
-    meListing listing = meListingAlloc();
-    uint64 listingID = meRootGetNextListingID(meTheRoot);
+    meMedia listing = meMediaAlloc();
+    uint64 listingID = meRootGetNextMediaID(meTheRoot);
 
-    meListingSetID(listing, listingID);
-    meRootSetNextListingID(meTheRoot, listingID + 1);
-    meListingSetRate(listing, rate);
-    meListingSetOffered(listing, offered);
-    meListingSetFixedPrice(listing, fixedPrice);
-    meListingSetTitle(listing, title, strlen(title) + 1);
-    meListingSetDescription(listing, description, strlen(description) + 1);
-    meCategoryAppendListing(category, listing);
-    meRootInsertListing(meTheRoot, listing);
-    meUserAppendListing(user, listing);
-    meCategorySetNumListings(category, meCategoryGetNumListings(category) + 1);
+    meMediaSetID(listing, listingID);
+    meRootSetNextMediaID(meTheRoot, listingID + 1);
+    meMediaSetOffered(listing, offered);
+    meMediaSetFixedPrice(listing, fixedPrice);
+    meMediaSetTitle(listing, title, strlen(title) + 1);
+    meMediaSetDescription(listing, description, strlen(description) + 1);
+    meCategoryAppendMedia(category, listing);
+    meRootInsertMedia(meTheRoot, listing);
+    meUserAppendMedia(user, listing);
+    meCategorySetNumMedias(category, meCategoryGetNumMedias(category) + 1);
     return listing;
 }
 
 /*--------------------------------------------------------------------------------------------------
   Update a listing
 --------------------------------------------------------------------------------------------------*/
-static void updateListing(
-    meListing listing,
+static void updateMedia(
+    meMedia listing,
     meCategory category,
     uint32 rate,
     bool offered,
@@ -1670,22 +1668,22 @@ static void updateListing(
     char *title,
     char *description)
 {
-    meListingSetRate(listing, rate);
-    meListingSetOffered(listing, offered);
-    meListingSetFixedPrice(listing, fixedPrice);
-    meListingSetTitle(listing, title, strlen(title) + 1);
-    meListingSetDescription(listing, description, strlen(description) + 1);
+    meMediaSetRate(listing, rate);
+    meMediaSetOffered(listing, offered);
+    meMediaSetFixedPrice(listing, fixedPrice);
+    meMediaSetTitle(listing, title, strlen(title) + 1);
+    meMediaSetDescription(listing, description, strlen(description) + 1);
 }
 
 /*--------------------------------------------------------------------------------------------------
   Create a new service listing.
 --------------------------------------------------------------------------------------------------*/
-static void processNewListingCommand(
+static void processNewMediaCommand(
     uint32 argc,
     char **argv)
 {
     meCategory category;
-    meListing listing;
+    meMedia listing;
     utSym categorySym;
     int64 rate;
     bool fixedPrice = false;
@@ -1718,21 +1716,21 @@ static void processNewListingCommand(
             return;
         }
     }
-    listing = meListingCreate(meCurrentUser, category, rate, offerService, fixedPrice, argv[4],
+    listing = meMediaCreate(meCurrentUser, category, rate, offerService, fixedPrice, argv[4],
         argv[5]);
     logCommand(argc, argv);
-    coPrintf("New listing created with listingID %llu\n", meListingGetID(listing));
+    coPrintf("New listing created with listingID %llu\n", meMediaGetID(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Process an edit listing command.
 --------------------------------------------------------------------------------------------------*/
-static void processEditListingCommand(
+static void processEditMediaCommand(
     uint32 argc,
     char **argv)
 {
     meCategory category;
-    meListing listing;
+    meMedia listing;
     utSym categorySym;
     int64 rate, listingID;
     bool fixedPrice = false;
@@ -1749,12 +1747,12 @@ static void processEditListingCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = meRootFindListing(meTheRoot, (uint32)listingID);
-    if(listing == meListingNull) {
+    listing = meRootFindMedia(meTheRoot, (uint32)listingID);
+    if(listing == meMediaNull) {
         coPrintf("No listing %llu.\n", listingID);
         return;
     }
-    if(meListingGetUser(listing) != meCurrentUser && !meUserSupremeLeader(meCurrentUser)) {
+    if(meMediaGetUser(listing) != meCurrentUser && !meUserSupremeLeader(meCurrentUser)) {
         coPrintf("You do not own this listing.\n");
         return;
     }
@@ -1777,20 +1775,20 @@ static void processEditListingCommand(
             return;
         }
     }
-    updateListing(listing, category, rate, offerService, fixedPrice, argv[5], argv[6]);
+    updateMedia(listing, category, rate, offerService, fixedPrice, argv[5], argv[6]);
     logCommand(argc, argv);
-    coPrintf("Listing updated\n", meListingGetID(listing));
+    coPrintf("Media updated\n", meMediaGetID(listing));
 }
 
 /*--------------------------------------------------------------------------------------------------
   Process a delete listing command.
 --------------------------------------------------------------------------------------------------*/
-static void processDeleteListingCommand(
+static void processDeleteMediaCommand(
     uint32 argc,
     char **argv)
 {
     meCategory category;
-    meListing listing;
+    meMedia listing;
     utSym categorySym;
     int64 listingID;
 
@@ -1805,23 +1803,23 @@ static void processDeleteListingCommand(
     if(!readInt(argv[1], &listingID, true)) {
         return;
     }
-    listing = meRootFindListing(meTheRoot, listingID);
-    if(listing == meListingNull) {
+    listing = meRootFindMedia(meTheRoot, listingID);
+    if(listing == meMediaNull) {
         coPrintf("Invalid listingID\n");
         return;
     }
-    if(meListingGetUser(listing) != meCurrentUser) {
+    if(meMediaGetUser(listing) != meCurrentUser) {
         coPrintf("You don't own this listing.\n");
         return;
     }
-    category = meListingGetCategory(listing);
-    meListingDestroy(listing);
-    meCategorySetNumListings(category, meCategoryGetNumListings(category) - 1);
-    if(meCategoryGetFirstListing(category) == meListingNull) {
+    category = meMediaGetCategory(listing);
+    meMediaDestroy(listing);
+    meCategorySetNumMedias(category, meCategoryGetNumMedias(category) - 1);
+    if(meCategoryGetFirstMedia(category) == meMediaNull) {
         meCategoryDestroy(category);
     }
     logCommand(argc, argv);
-    coPrintf("Listing %llu deleted.\n", listingID);
+    coPrintf("Media %llu deleted.\n", listingID);
 }
 
 /*--------------------------------------------------------------------------------------------------
@@ -2031,12 +2029,12 @@ static bool processCommand(
         processListAnnouncementsCommand(argc, argv);
     } else if(!strcmp(command, "showAnnouncement")) {
         processShowAnnouncementCommand(argc, argv);
-    } else if(!strcmp(command, "newListing")) {
-        processNewListingCommand(argc, argv);
-    } else if(!strcmp(command, "editListing")) {
-        processEditListingCommand(argc, argv);
-    } else if(!strcmp(command, "deleteListing")) {
-        processDeleteListingCommand(argc, argv);
+    } else if(!strcmp(command, "newMedia")) {
+        processNewMediaCommand(argc, argv);
+    } else if(!strcmp(command, "editMedia")) {
+        processEditMediaCommand(argc, argv);
+    } else if(!strcmp(command, "deleteMedia")) {
+        processDeleteMediaCommand(argc, argv);
     } else if(!strcmp(command, "createCategory")) {
         processCreateCategoryCommand(argc, argv);
     } else if(!strcmp(command, "deleteCategory")) {
