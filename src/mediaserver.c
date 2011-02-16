@@ -840,10 +840,6 @@ static meUser createNewUser(
         coPrintf("User %s already exists.\n", argv[1]);
         return meUserNull;
     }
-    if(meRootFindByEmailUser(meTheRoot, emailSym) != meUserNull) {
-        coPrintf("E-mail address %s is already in use.\n", argv[3]);
-        return meUserNull;
-    }
     user = meUserAlloc();
     meUserSetSym(user, userSym);
     meUserSetShownName(user, argv[2], strlen(argv[2]) + 1);
@@ -883,7 +879,6 @@ static meUser createNewUser(
         coPrintf("User %s is the supreme leader.\n", meUserGetShownName(user));
     }
     meRootAppendUser(meTheRoot, user);
-    meRootInsertByEmailUser(meTheRoot, user);
     return user;
 }
 
@@ -1011,11 +1006,6 @@ static void processUpdateAccountCommand(
         coPrintf("User %s already exists.\n", argv[1]);
         return;
     }
-    user = meRootFindByEmailUser(meTheRoot, emailSym);
-    if(user != meUserNull && user != meCurrentUser) {
-        coPrintf("E-mail address %s is already in use.\n", argv[2]);
-        return;
-    }
     if(!meProcessingLogFile) {
         if(argc == 5) {
             password = argv[4];
@@ -1038,9 +1028,7 @@ static void processUpdateAccountCommand(
         meRootRenameUser(meTheRoot, meCurrentUser, userSym);
     }
     meUserSetShownName(meCurrentUser, argv[1], strlen(argv[1]) + 1);
-    meRootRemoveByEmailUser(meTheRoot, meCurrentUser);
     meUserSetEmail(meCurrentUser, emailSym);
-    meRootInsertByEmailUser(meTheRoot, meCurrentUser);
     coPrintf("Account updated succesfully.\n");
 }
 

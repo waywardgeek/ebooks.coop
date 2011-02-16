@@ -66,16 +66,14 @@ class Charity
 // Connector class from User to Charity
 class Cause
 
-class Seller
-
 class Category
     uint32 numMedias
+    bool showRoot // Only set for root categories that make sense at top level
 
 // Link from a Category to a Media object
 class Label
 
 class Ebook
-    array char Title
     bool hasAudio
     bool isSingle  // Short ebook
 
@@ -90,7 +88,7 @@ class Album
 
 class Song
 
-class NewsPaper
+class Newspaper
 
 class Software
 
@@ -109,34 +107,41 @@ class Media
         Magazine magazine: ME_MAGAZINE
         Song song: ME_SONG
         Album album: ME_ALBUM
-        NewsPaper newsPaper: ME_NEWS_PAPER
+        Newspaper newsPaper: ME_NEWS_PAPER
         Software software: ME_SOFTWARE
 
-class Item
+class License
 
 relationship Root User hashed
-relationship Root:ByEmail User:ByEmail hashed email
 relationship Root Charity doubly_linked
 relationship User Charity mandatory
 relationship Charity Cause doubly_linked mandatory
 relationship User Cause hashed Charity mandatory
-relationship User Seller mandatory
 relationship User CreditCard doubly_linked mandatory
 relationship User:From Transaction:Out doubly_linked mandatory
 relationship CreditCard Transaction
-relationship Media Item doubly_linked mandatory
-relationship User Item doubly_linked mandatory
-relationship Item Transaction cascade
+relationship Media License doubly_linked mandatory
+relationship User License doubly_linked mandatory
+relationship License Transaction cascade
 relationship User:To Transaction:In doubly_linked mandatory
 relationship User Media doubly_linked mandatory
-relationship Root Category:Root
-relationship Category Category hashed cascade
+relationship Root Category hashed
+relationship Root Category:Root doubly_linked
+relationship Category Category doubly_linked cascade
 relationship Category Label doubly_linked mandatory
 relationship Media Label doubly_linked mandatory
 relationship Root Media hashed ID
 relationship Root Session hashed
 relationship Session User
-relationship Seller Media doubly_linked mandatory
+
+schema Media
+
+relationship Media Ebook parent_only mandatory
+relationship Media Magazine parent_only mandatory
+relationship Media Song parent_only mandatory
+relationship Media Album parent_only mandatory
+relationship Media Newspaper parent_only mandatory
+relationship Media Software parent_only mandatory
 relationship Album Song doubly_linked mandatory
 relationship Ebook Chapter doubly_linked mandatory
 
