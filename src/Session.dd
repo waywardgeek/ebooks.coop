@@ -1,0 +1,12 @@
+module Session se
+
+import Media
+
+class Root: Media
+
+class User: Media
+
+class Session
+
+relationship Root Session hashed
+relationship Session User

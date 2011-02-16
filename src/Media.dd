@@ -12,17 +12,17 @@ enum MediaType
     ME_MOVIE
 
 enum TransactionType
+    ME_PURCHASE
     ME_TRANSFER
     ME_DEPOSIT
     ME_WITHDRAWL
+    ME_DONATION
 
 class Root
     uint64 nextMediaID
     uint64 nextThreadID
     uint64 nextPostID
-    uint64 nextAnnouncementID
-
-class Session
+    uint64 nextGroupID
 
 class User
     array char shownName
@@ -73,29 +73,15 @@ class Category
 // Link from a Category to a Media object
 class Label
 
-class Ebook
-    bool hasAudio
-    bool isSingle  // Short ebook
+class Author
+    uint32 ID
+    array char bio
 
-class Chapter
-    array char text // In markdown format?
-    bool hasAudio
-    array char audioFileName
-
-class Magazine
-
-class Album
-
-class Song
-
-class Newspaper
-
-class Software
+class Name
 
 class Media
     MediaType type
     array char title
-    array char Author
     uint64 ID
     uint32 price
     uint8 rating
@@ -124,17 +110,38 @@ relationship Media License doubly_linked mandatory
 relationship User License doubly_linked mandatory
 relationship License Transaction cascade
 relationship User:To Transaction:In doubly_linked mandatory
-relationship User Media doubly_linked mandatory
+relationship User:CopyrightHolder Media doubly_linked mandatory
 relationship Root Category hashed
 relationship Root Category:Root doubly_linked
 relationship Category Category doubly_linked cascade
 relationship Category Label doubly_linked mandatory
 relationship Media Label doubly_linked mandatory
 relationship Root Media hashed ID
-relationship Root Session hashed
-relationship Session User
+relationship Root Author hashed ID
+relationship Root Name hashed
+relationship Name Author doubly_linked mandatory
+relationship Author Media doubly_linked mandatory
 
 schema Media
+
+class Ebook
+    bool hasAudio
+    bool isSingle  // Short ebook
+
+class Chapter
+    array char text // In markdown format?
+    bool hasAudio
+    array char audioFileName
+
+class Magazine
+
+class Album
+
+class Song
+
+class Newspaper
+
+class Software
 
 relationship Media Ebook parent_only mandatory
 relationship Media Magazine parent_only mandatory
@@ -146,6 +153,9 @@ relationship Album Song doubly_linked mandatory
 relationship Ebook Chapter doubly_linked mandatory
 
 schema Forum
+
+class Group
+    uint32 ID
 
 class Thread
     array char subject
@@ -159,17 +169,21 @@ class Post
 
 class Subscription
 
-class Announcement
-    uint64 date
-    array char subject
-    array char message
-    uint32 ID
+class Follow
 
-relationship Root Thread hashed ID
-relationship Root Post hashed ID
-relationship Thread Post doubly_linked mandatory
-relationship User Post hashed ID mandatory
-relationship Thread Subscription doubly_linked mandatory
+class Review
+    uint8 stars
+    array char title
+    array char text
+    bool recommended
+
+relationship Root Group hashed ID
+relationship Group Thread hashed ID mandatory
+relationship Thread Post hashed ID mandatory
+relationship User Post doubly_linked mandatory
+relationship Group Subscription doubly_linked mandatory
 relationship User Subscription doubly_linked mandatory
-relationship User Announcement doubly_linked mandatory
-relationship Root Announcement hashed ID mandatory
+relationship Thread Follow doubly_linked mandatory
+relationship User Follow doubly_linked mandatory
+relationship User Review doubly_linked mandatory
+relationship Media Review doubly_linked mandatory
